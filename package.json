@@ -1,0 +1,16 @@
+{
+  "name": "ttl_rl-monorepo",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace frontend & npm start --workspace backend",
+    "backend": "npm start --workspace backend",
+    "frontend": "npm run dev --workspace frontend"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}

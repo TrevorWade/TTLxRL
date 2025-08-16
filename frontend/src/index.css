@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Live feed card animation */
+.slide-in-left {
+  animation: slide-in-left 150ms ease-out both;
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Count bump animation for aggregated live feed */
+.count-bump-anim {
+  animation: count-bump 220ms ease-out both;
+}
+
+@keyframes count-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+
+
+
