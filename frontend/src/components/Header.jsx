@@ -12,7 +12,7 @@ export default function Header({
   onConnectionChange 
 }) {
   return (
-    <header className="bg-tiktok-black border-b border-tiktok-gray px-6 py-4">
+    <header className="bg-tiktok-black border-b border-tiktok-gray px-6 py-4 relative z-50">
       <div className="flex items-center justify-between">
         {/* Logo and title */}
         <div className="flex items-center gap-4">
