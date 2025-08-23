@@ -1,2 +1,19 @@
 node_modules
 .env.local
+
+# Plan and documentation files
+*_plan.md
+*_plan*
+*plan*.md
+*improvement_plan.md
+*implementation_summary.md
+*windows_build_steps.md
+*site_design.md
+
+# Working documents
+gift_mapper
+
+# Large data files (regenerate as needed)
+gifts.json
+frontend/src/data/gifts.json
+frontend/public/gifts.json

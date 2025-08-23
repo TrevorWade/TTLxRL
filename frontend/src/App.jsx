@@ -206,11 +206,15 @@ export default function App() {
 
   // LikeTriggerEngine - monitors totalLikes and fires triggers
   useEffect(() => {
+    console.log(`🔍 Like trigger engine running - totalLikes: ${totalLikes}, triggers: ${likeTriggers.length}`);
+    
     likeTriggers.forEach((trigger, index) => {
       const multiplier = Math.floor(totalLikes / trigger.threshold);
+      console.log(`🔍 Checking trigger: ${trigger.threshold} likes -> "${trigger.key}" (current: ${totalLikes}, multiplier: ${multiplier}, fired: ${trigger.firedCount})`);
+      
       if (multiplier > trigger.firedCount) {
         // Fire the trigger
-        console.log(`Like trigger fired: ${trigger.threshold} likes -> key "${trigger.key}"`);
+        console.log(`🔥 Like trigger fired: ${trigger.threshold} likes -> key "${trigger.key}" (fired ${multiplier} times)`);
         send({ 
           type: 'like-key', 
           key: trigger.key, 
@@ -223,7 +227,7 @@ export default function App() {
         setLikeTriggers(updatedTriggers);
       }
     });
-  }, [totalLikes, likeTriggers]);
+  }, [totalLikes]); // Remove likeTriggers from dependency to prevent recreation
 
   // Profiles helpers
   function persistProfiles(next) {
@@ -302,7 +306,14 @@ export default function App() {
   }
 
   function resetTriggerCounts() {
+    // Reset total likes to 0
+    setTotalLikes(0);
+    
+    // Reset all trigger fired counts to 0
     setLikeTriggers(likeTriggers.map(t => ({ ...t, firedCount: 0 })));
+    
+    // Send reset message to backend
+    send({ type: 'reset-like-counts' });
   }
 
   const rows = useMemo(() => Object.entries(mapping), [mapping]);

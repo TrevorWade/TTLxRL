@@ -136,7 +136,7 @@ function TriggerCard({
             </div>
             <div className="w-full bg-gray-700 rounded-full h-2">
               <div 
-                className="bg-gradient-to-r from-tiktok-red to-tiktok-pink h-2 rounded-full transition-all duration-300"
+                className="bg-tiktok-cyan h-2 rounded-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               ></div>
             </div>

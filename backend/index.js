@@ -39,8 +39,16 @@ const wss = new WebSocketServer({ port }, () => {
 // Broadcast helper
 function broadcast(payload) {
   const message = JSON.stringify(payload);
+  const clientCount = wss.clients.size;
+  console.log(`📡 Broadcasting to ${clientCount} clients:`, payload.type);
+  
   wss.clients.forEach((client) => {
-    if (client.readyState === 1) client.send(message);
+    if (client.readyState === 1) {
+      client.send(message);
+      console.log(`✅ Sent to client ${client._id || 'unknown'}`);
+    } else {
+      console.log(`❌ Client ${client._id || 'unknown'} not ready (state: ${client.readyState})`);
+    }
   });
 }
 
@@ -65,6 +73,8 @@ async function checkTargetWindowFocused() {
 
 // Handle messages from frontend (mapping updates, pause toggle, test events)
 wss.on('connection', (ws) => {
+  console.log('🔌 New WebSocket client connected');
+  
   // Send current state to new client
   ws.send(JSON.stringify({ 
     type: 'init', 
@@ -81,7 +91,8 @@ wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
-
+      console.log(`📨 Received WebSocket message: ${msg.type}`);
+      
       if (msg.type === 'update-mapping') {
         // Entire mapping replaces current one
         giftToAction = msg.mapping || {};
@@ -114,30 +125,57 @@ wss.on('connection', (ws) => {
         if (triggerKey && targetLikes > 0) {
           console.log(`🧪 Testing like trigger: every ${targetLikes} likes → "${triggerKey}"`);
           
+          // Don't modify the actual totalLikes - just test the trigger
           // Calculate how many likes needed to trigger
           const currentLikes = totalLikes;
           const likesNeeded = targetLikes - (currentLikes % targetLikes);
           const testLikes = likesNeeded === 0 ? targetLikes : likesNeeded;
           
-          // Simulate the exact number of likes needed
-          totalLikes += testLikes;
+          console.log(`🧪 Simulated +${testLikes} likes (${currentLikes} → ${currentLikes + testLikes}) - TEST ONLY`);
           
-          console.log(`🧪 Simulated +${testLikes} likes (${currentLikes} → ${totalLikes})`);
-          
-          // Broadcast like update
-          broadcast({ 
-            type: 'like', 
-            likeCount: testLikes, 
-            totalLikes: totalLikes 
-          });
-          
-          // Execute the key action if not paused
+          // Execute the key action if not paused (without updating totalLikes)
           if (!isPaused) {
-            executeKeyAction({ 
-              key: triggerKey, 
-              durationSec: 1.0, 
-              cooldownMs: 0 
-            }, `like-trigger-${targetLikes}`);
+            console.log(`⏰ Waiting 3000ms before executing like trigger test...`);
+            setTimeout(async () => {
+              // Use the same key injection logic as gifts
+              const key = String(triggerKey).toLowerCase();
+              const durationMs = 1000; // 1 second duration for test
+              
+              // Focus guard
+              const focus = await checkTargetWindowFocused();
+              if (!focus.ok) {
+                console.log('Target window not focused; skipping like key trigger test');
+                return;
+              }
+
+              console.log(`Like trigger test: Press key "${key}" for ${durationMs}ms (mode=${currentInjectionMode})`);
+              
+              if (currentInjectionMode === 'autohotkey') {
+                const ahkPath = process.env.AHK_PATH || 'AutoHotkey.exe';
+                const ahkKey = mapKeyToAhk(key);
+                const titleMatch = targetWindowKeyword;
+
+                const v2script = buildAhkHoldScriptV2(ahkKey, durationMs, titleMatch);
+                const v1script = buildAhkHoldScriptV1(ahkKey, durationMs, titleMatch);
+
+                const tmpV2 = path.join(os.tmpdir(), `ttlrl_like_test_${Date.now()}_${Math.random().toString(36).slice(2)}_v2.ahk`);
+                fs.writeFileSync(tmpV2, v2script, 'utf8');
+                const v2ok = await runAhk(ahkPath, tmpV2);
+                try { fs.unlinkSync(tmpV2); } catch {}
+                if (!v2ok) {
+                  const tmpV1 = path.join(os.tmpdir(), `ttlrl_like_test_${Date.now()}_${Math.random().toString(36).slice(2)}_v1.ahk`);
+                  fs.writeFileSync(tmpV1, v1script, 'utf8');
+                  await runAhk(ahkPath, tmpV1);
+                  try { fs.unlinkSync(tmpV1); } catch {}
+                }
+              } else {
+                // Default to nodesender
+                sender.startBatch();
+                sender.batchTypeKey(key, 0, sender.BATCH_EVENT_KEY_DOWN);
+                sender.batchTypeKey(key, durationMs, sender.BATCH_EVENT_KEY_UP);
+                await sender.sendBatch();
+              }
+            }, 3000);
           }
         }
       }
@@ -206,6 +244,7 @@ wss.on('connection', (ws) => {
         // Connect to a TikTok username
         const targetUsername = String(msg.username || '').trim();
         if (!targetUsername) {
+          console.log('❌ TikTok connection request missing username');
           ws.send(JSON.stringify({ 
             type: 'connection-error', 
             error: 'Username is required' 
@@ -213,14 +252,17 @@ wss.on('connection', (ws) => {
           return;
         }
         
-        console.log(`Connection request for @${targetUsername}`);
+        console.log(`📨 Received TikTok connection request for @${targetUsername}`);
         const success = await connectToTikTok(targetUsername);
         
         if (success) {
+          console.log(`✅ TikTok connection successful for @${targetUsername}`);
           ws.send(JSON.stringify({ 
             type: 'connection-success', 
             username: targetUsername 
           }));
+        } else {
+          console.log(`❌ TikTok connection failed for @${targetUsername}`);
         }
       }
 
@@ -240,9 +282,36 @@ wss.on('connection', (ws) => {
           isLive: isLive
         }));
       }
+
+      if (msg.type === 'reset-like-counts') {
+        // Reset total likes and all trigger counts
+        console.log('🔄 Resetting like counts and trigger counts');
+        totalLikes = 0;
+        
+        // Broadcast the reset to all clients
+        broadcast({ 
+          type: 'like', 
+          likeCount: 0, 
+          totalLikes: 0 
+        });
+        
+        // Send success response
+        ws.send(JSON.stringify({ 
+          type: 'reset-success', 
+          message: 'Like counts reset successfully' 
+        }));
+      }
     } catch (e) {
       console.error('Invalid WS message', e);
     }
+  });
+  
+  ws.on('close', () => {
+    console.log('🔌 WebSocket client disconnected');
+  });
+  
+  ws.on('error', (error) => {
+    console.error('🔌 WebSocket error:', error);
   });
 });
 
@@ -256,12 +325,16 @@ let isLive = false; // Track if the connected user is currently live streaming
 // TikTok Connection Management
 async function connectToTikTok(targetUsername) {
   try {
+    console.log(`🔄 Starting TikTok connection process for @${targetUsername}`);
+    
     // Disconnect existing connection if any
     if (tiktok) {
       try {
+        console.log('🔄 Disconnecting existing connection...');
         await tiktok.disconnect();
+        console.log('✅ Existing connection disconnected');
       } catch (e) {
-        console.log('Error disconnecting previous connection:', e.message);
+        console.log('⚠️ Error disconnecting previous connection:', e.message);
       }
     }
 
@@ -270,6 +343,7 @@ async function connectToTikTok(targetUsername) {
     isLive = false;
     username = targetUsername;
     
+    console.log('📡 Broadcasting connection status: connecting');
     broadcast({ 
       type: 'connection-status', 
       status: connectionStatus, 
@@ -278,16 +352,18 @@ async function connectToTikTok(targetUsername) {
       isLive: false
     });
 
-    console.log(`Connecting to @${username}...`);
+    console.log(`🔗 Creating WebcastPushConnection for @${username}...`);
     
     // Create new connection
     tiktok = new WebcastPushConnection(username, {
       enableExtendedGiftInfo: true,
     });
 
+    console.log('🎧 Setting up TikTok event listeners...');
     // Set up event listeners
     setupTikTokEventListeners();
 
+    console.log('🚀 Attempting to connect to TikTok Live...');
     // Attempt connection
     await tiktok.connect();
     
@@ -295,6 +371,7 @@ async function connectToTikTok(targetUsername) {
     isLive = true; // Assume live when connection succeeds
     console.log(`✅ Successfully connected to @${username}`);
     
+    console.log('📡 Broadcasting connection success...');
     broadcast({ 
       type: 'connection-status', 
       status: connectionStatus, 
@@ -306,11 +383,18 @@ async function connectToTikTok(targetUsername) {
     return true;
     
   } catch (error) {
+    console.error(`❌ TikTok connection failed for @${targetUsername}:`, error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    
     connectionStatus = 'error';
     connectionError = error.message;
     isLive = false;
-    console.error(`❌ Failed to connect to @${username}:`, error.message);
     
+    console.log('📡 Broadcasting connection error...');
     broadcast({ 
       type: 'connection-status', 
       status: connectionStatus, 
@@ -368,7 +452,12 @@ function setupTikTokEventListeners() {
     const likeCount = Number(data?.likeCount || 1);
     totalLikes += likeCount;
     console.log(`Like received: +${likeCount} (total: ${totalLikes})`);
-    broadcast({ type: 'like', likeCount, totalLikes });
+    
+    // Debug: Log the broadcast message
+    const broadcastMsg = { type: 'like', likeCount, totalLikes };
+    console.log(`📡 Broadcasting like update:`, broadcastMsg);
+    
+    broadcast(broadcastMsg);
   });
 
   // Connection state events

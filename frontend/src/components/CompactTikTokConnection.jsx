@@ -12,7 +12,10 @@ export default function CompactTikTokConnection({
   isLive = false,
   onConnectionChange 
 }) {
-  const [inputUsername, setInputUsername] = useState('');
+  const [inputUsername, setInputUsername] = useState(() => {
+    // Load last entered username from localStorage
+    return localStorage.getItem('lastTikTokUsername') || '';
+  });
   const [isExpanded, setIsExpanded] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
 
@@ -22,6 +25,13 @@ export default function CompactTikTokConnection({
       setInputUsername(username);
     }
   }, [username, inputUsername]);
+
+  // Save username to localStorage when it changes
+  useEffect(() => {
+    if (inputUsername.trim()) {
+      localStorage.setItem('lastTikTokUsername', inputUsername);
+    }
+  }, [inputUsername]);
 
   // Update connecting state based on connection status
   useEffect(() => {
@@ -129,6 +139,14 @@ export default function CompactTikTokConnection({
               Disconnect
             </button>
           </div>
+        )}
+
+        {/* Click outside to close for connected state */}
+        {isExpanded && (
+          <div 
+            className="fixed inset-0 z-40" 
+            onClick={() => setIsExpanded(false)}
+          ></div>
         )}
       </div>
     );
