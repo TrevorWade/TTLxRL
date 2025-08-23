@@ -37,6 +37,10 @@ start "TTL_RL Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
 REM ---- Start backend in new window ----
 start "TTL_RL Backend" cmd /k "cd /d %~dp0backend && npm start"
 
+REM ---- Wait a moment for servers to start, then open browser ----
+timeout /t 3 /nobreak >nul
+start http://localhost:5173
+
 echo.
 echo ============================================
 echo  Both servers starting...                  
