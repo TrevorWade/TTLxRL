@@ -135,7 +135,7 @@ wss.on('connection', (ws) => {
           if (!isPaused) {
             executeKeyAction({ 
               key: triggerKey, 
-              durationSec: 0.3, 
+              durationSec: 1.0, 
               cooldownMs: 0 
             }, `like-trigger-${targetLikes}`);
           }

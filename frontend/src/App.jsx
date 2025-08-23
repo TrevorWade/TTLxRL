@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { connect, send } from './ws';
+import MainLayout from './components/MainLayout';
+import { CleanMappingSection } from './components/MappingSection';
+import LiveFeedSection from './components/LiveFeedSection';
+import TikTokConnection from './components/TikTokConnection';
 
 function useLocalStorage(key, initialValue) {
   const [val, setVal] = useState(() => {
@@ -22,6 +26,11 @@ export default function App() {
   // Aggregated feed: map + order per plan
   const [feedMap, setFeedMap] = useState({}); // key -> item
   const [feedOrder, setFeedOrder] = useState([]); // array of keys, newest first
+  // TikTok connection state
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [connectedUsername, setConnectedUsername] = useState('');
+  const [connectionError, setConnectionError] = useState(null);
+  const [isLive, setIsLive] = useState(false);
   const feedMapRef = useRef(feedMap);
   const feedOrderRef = useRef(feedOrder);
   useEffect(() => { feedMapRef.current = feedMap; }, [feedMap]);
@@ -60,6 +69,11 @@ export default function App() {
         if (typeof msg.totalLikes === 'number') {
           setTotalLikes(msg.totalLikes);
         }
+        // Initialize connection state
+        setConnectionStatus(msg.connectionStatus || 'disconnected');
+        setConnectedUsername(msg.username || '');
+        setConnectionError(msg.connectionError || null);
+        setIsLive(msg.isLive || false);
       }
       if (msg.type === 'gift') {
         const nowTs = Number(msg.ts) || Date.now();
@@ -159,6 +173,12 @@ export default function App() {
       if (msg.type === 'pause-updated') {
         setPaused(!!msg.paused);
       }
+      if (msg.type === 'connection-status') {
+        setConnectionStatus(msg.status || 'disconnected');
+        setConnectedUsername(msg.username || '');
+        setConnectionError(msg.error || null);
+        setIsLive(msg.isLive || false);
+      }
       if (msg.type === 'focus-warning') {
         // Surface a lightweight toast/banner in the feed
         setFeedOrder((o) => [
@@ -244,7 +264,7 @@ export default function App() {
   function upsertMapping(giftName, key, durationSec, cooldownMs) {
     const gift = giftName.toLowerCase().trim();
     if (!gift) return;
-    const next = { ...mapping, [gift]: { key, durationSec: Number(durationSec) || 0.3, cooldownMs: Number(cooldownMs) || 0 } };
+    const next = { ...mapping, [gift]: { key, durationSec: Number(durationSec) || 1.0, cooldownMs: Number(cooldownMs) || 0 } };
     setMapping(next);
   }
 
@@ -288,279 +308,53 @@ export default function App() {
   const rows = useMemo(() => Object.entries(mapping), [mapping]);
   const aggregatedFeed = useMemo(() => feedOrder.map((k) => feedMap[k]).filter(Boolean), [feedMap, feedOrder]);
 
+  function handleConnectionChange(status, username) {
+    // Optional callback for connection state changes
+    console.log(`Connection ${status} for @${username}`);
+  }
+
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
-      <h1 className="text-2xl font-bold mb-4">TikTok Gift → Key Mapper</h1>
-
-      <div className="flex gap-4 mb-6">
-        <button onClick={togglePause} className={`px-3 py-2 rounded ${paused ? 'bg-yellow-600' : 'bg-emerald-600'}`}>
-          {paused ? 'Resume' : 'Pause'}
-        </button>
-        <AddRow onAdd={upsertMapping} />
-        <button onClick={deleteAllMappings} className="px-3 py-2 rounded bg-red-700">Delete All</button>
-      </div>
-
-      {/* Profiles */}
-      <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
-        <div className="flex gap-2 items-center">
-          <input
-            placeholder="Profile name"
-            className="bg-slate-800 px-3 py-2 rounded w-full"
-            value={profileName}
-            onChange={(e) => setProfileName(e.target.value)}
-          />
-          <button onClick={saveCurrentAsProfile} className="px-3 py-2 bg-indigo-600 rounded whitespace-nowrap">Save Profile</button>
-        </div>
-        <div className="flex gap-2 items-center">
-          <select
-            className="bg-slate-800 px-3 py-2 rounded w-full"
-            value={profileName || ''}
-            onChange={(e) => loadProfile(e.target.value)}
-          >
-            <option value="">Select profile…</option>
-            {Object.keys(profiles).map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-          <button
-            onClick={() => profileName && deleteProfile(profileName)}
-            className="px-3 py-2 bg-slate-700 rounded whitespace-nowrap"
-          >
-            Delete Profile
-          </button>
-        </div>
-      </div>
-
-      <table className="w-full text-left mb-8">
-        <thead>
-          <tr className="text-slate-300">
-            <th className="py-2">Gift name</th>
-            <th className="py-2">Key</th>
-            <th className="py-2">Duration (sec)</th>
-            <th className="py-2">Cooldown (ms)</th>
-            <th className="py-2">Test</th>
-            <th className="py-2">Remove</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(([gift, cfg]) => (
-            <tr key={gift} className="border-t border-slate-700">
-              <td className="py-2">{gift}</td>
-              <td className="py-2">{cfg.key}</td>
-              <td className="py-2">{cfg.durationSec ?? (cfg.durationMs ? (cfg.durationMs/1000) : 0)}</td>
-              <td className="py-2">{cfg.cooldownMs ?? 0}</td>
-              <td className="py-2">
-                <button onClick={() => testGift(gift)} className="px-2 py-1 bg-blue-600 rounded">Run</button>
-              </td>
-              <td className="py-2">
-                <button onClick={() => removeMapping(gift)} className="px-2 py-1 bg-red-600 rounded">X</button>
-              </td>
-            </tr>
-          ))}
-          {!rows.length && (
-            <tr>
-              <td colSpan={5} className="py-4 text-slate-400">No mappings yet. Add one above.</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-
-      <h2 className="text-xl font-semibold mb-2">Live feed</h2>
-      {/* Like Counter Display */}
-      <div className="mb-4 p-4 bg-slate-800 rounded-lg border border-slate-600">
-        <div className="flex items-center gap-4">
-          <div className="text-3xl">❤️</div>
-          <div>
-            <div className="text-sm text-slate-400">Total Likes</div>
-            <div className="text-4xl font-bold text-red-400">{totalLikes.toLocaleString()}</div>
-          </div>
-        </div>
-      </div>
+    <MainLayout
+      connectionStatus={connectionStatus}
+      connectedUsername={connectedUsername}
+      connectionError={connectionError}
+      isLive={isLive}
+      onConnectionChange={handleConnectionChange}
+    >
+      {/* Mapping Section - Left side (60% width on desktop) */}
+      <CleanMappingSection
+        mapping={mapping}
+        setMapping={setMapping}
+        profiles={profiles}
+        profileName={profileName}
+        setProfileName={setProfileName}
+        onSaveProfile={saveCurrentAsProfile}
+        onLoadProfile={loadProfile}
+        onDeleteProfile={deleteProfile}
+        onTestGift={testGift}
+        paused={paused}
+        onTogglePause={togglePause}
+        totalLikes={totalLikes}
+        // Like trigger props
+        likeTriggers={likeTriggers}
+        onAddLikeTrigger={addLikeTrigger}
+        onRemoveLikeTrigger={removeLikeTrigger}
+        onResetTriggerCounts={resetTriggerCounts}
+      />
       
-      <div ref={feedRef} className="max-h-96 overflow-y-auto pr-3 space-y-2 w-full max-w-2xl">
-        {aggregatedFeed.map((e) => (
-          <div key={e.id} className={`flex items-center gap-3 bg-slate-800/70 border border-slate-700 rounded-lg p-3 ${e.fresh ? 'slide-in-left' : ''}`}>
-            {e.imageUrl ? (
-              <img src={e.imageUrl} alt={e.gift} className="w-12 h-12 rounded-lg shrink-0 object-cover" />
-            ) : (
-              <div className="w-12 h-12 rounded-lg bg-slate-700 shrink-0" />
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-semibold text-slate-100 text-base truncate">{e.sender}</div>
-                <div className="text-xs text-slate-400 tabular-nums whitespace-nowrap">{new Date(e.lastTime).toLocaleTimeString()}</div>
-              </div>
-              <div className="text-slate-200 truncate text-sm">sent “{e.gift}”</div>
-            </div>
-            <div className="w-12 h-12 shrink-0 flex items-center justify-center">
-              <div className={`text-indigo-400 font-bold tabular-nums leading-none ${'count-bump-anim'} text-2xl`} key={`bump-${e.bumpToken}`}>
-                ×{e.count}
-              </div>
-            </div>
-          </div>
-        ))}
-        {!aggregatedFeed.length && (
-          <div className="text-slate-400 text-sm">No events yet. Go live and send a gift to see activity.</div>
-        )}
-      </div>
-
-      {/* Like Triggers Management */}
-      <div className="mt-8">
-        <h2 className="text-xl font-semibold mb-4">Like Triggers</h2>
-        
-        {/* Add New Trigger */}
-        <div className="mb-6">
-          <AddLikeTrigger onAdd={addLikeTrigger} />
-        </div>
-
-        {/* Trigger Controls */}
-        <div className="mb-4 flex gap-2">
-          <button 
-            onClick={resetTriggerCounts}
-            className="px-3 py-2 bg-yellow-600 rounded"
-          >
-            Reset All Counts
-          </button>
-        </div>
-
-        {/* Triggers List */}
-        <div className="space-y-2 max-w-4xl">
-          {likeTriggers.map((trigger) => (
-            <div key={trigger.id} className="flex items-center gap-4 p-3 bg-slate-800 rounded-lg border border-slate-600">
-              <div className="flex-1">
-                <div className="text-sm text-slate-400">Every {trigger.threshold.toLocaleString()} likes</div>
-                <div className="text-lg">Press "{trigger.key}" for {trigger.durationMs}ms</div>
-                <div className="text-xs text-slate-500">
-                  Fired {trigger.firedCount}× 
-                  {trigger.firedCount > 0 && ` (last: ${(trigger.firedCount * trigger.threshold).toLocaleString()} likes)`}
-                </div>
-              </div>
-              <button
-                onClick={() => removeLikeTrigger(trigger.id)}
-                className="px-3 py-2 bg-red-600 rounded"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-          {!likeTriggers.length && (
-            <div className="text-slate-400 text-sm">No like triggers configured. Add one above.</div>
-          )}
-        </div>
-      </div>
-    </div>
+      {/* Live Feed Section - Right side (40% width on desktop) */}
+      <LiveFeedSection
+        aggregatedFeed={aggregatedFeed}
+        totalLikes={totalLikes}
+        // Connection status for display
+        connectionStatus={connectionStatus}
+        connectedUsername={connectedUsername}
+        isLive={isLive}
+      />
+    </MainLayout>
   );
 }
 
-function AddLikeTrigger({ onAdd }) {
-  const [threshold, setThreshold] = useState(100);
-  const [key, setKey] = useState('a');
-  const [durationMs, setDurationMs] = useState(300);
 
-  const handleSubmit = () => {
-    onAdd(threshold, key, durationMs);
-    setThreshold(100);
-    setKey('a');
-    setDurationMs(300);
-  };
-
-  return (
-    <div className="flex gap-2 items-center">
-      <span className="text-sm text-slate-400">Every</span>
-      <input
-        type="number"
-        min="1"
-        placeholder="Threshold (e.g., 100)"
-        className="bg-slate-800 px-3 py-2 rounded w-32"
-        value={threshold}
-        onChange={(e) => setThreshold(Number(e.target.value))}
-      />
-      <span className="text-sm text-slate-400">likes, press</span>
-      <input
-        placeholder="Key (e.g., a)"
-        className="bg-slate-800 px-3 py-2 rounded w-16"
-        value={key}
-        onChange={(e) => setKey(e.target.value)}
-      />
-      <span className="text-sm text-slate-400">for</span>
-      <input
-        type="number"
-        min="0"
-        placeholder="Duration (ms)"
-        className="bg-slate-800 px-3 py-2 rounded w-24"
-        value={durationMs}
-        onChange={(e) => setDurationMs(Number(e.target.value))}
-      />
-      <span className="text-sm text-slate-400">ms</span>
-      <button
-        onClick={handleSubmit}
-        className="px-4 py-2 bg-indigo-600 rounded"
-      >
-        Add Trigger
-      </button>
-    </div>
-  );
-}
-
-function AddRow({ onAdd }) {
-  const [gift, setGift] = useState('');
-  const [key, setKey] = useState('a');
-  const [durationSec, setDurationSec] = useState(0.3);
-  const [cooldown, setCooldown] = useState(0);
-
-  return (
-    <div className="flex gap-2">
-      <input
-        list="tiktok-gifts"
-        placeholder="Gift name (e.g., Rose)"
-        className="bg-slate-800 px-3 py-2 rounded"
-        value={gift}
-        onChange={(e) => setGift(e.target.value)}
-      />
-      <input
-        placeholder="Key (e.g., a)"
-        className="bg-slate-800 px-3 py-2 rounded"
-        value={key}
-        onChange={(e) => setKey(e.target.value)}
-      />
-      <input
-        type="number"
-        step="0.1"
-        min="0"
-        placeholder="Duration (sec)"
-        className="bg-slate-800 px-3 py-2 rounded w-40"
-        value={durationSec}
-        onChange={(e) => setDurationSec(e.target.value)}
-      />
-      <input
-        type="number"
-        placeholder="Cooldown (ms)"
-        className="bg-slate-800 px-3 py-2 rounded w-40"
-        value={cooldown}
-        onChange={(e) => setCooldown(e.target.value)}
-      />
-      <button
-        onClick={() => onAdd(gift, key, durationSec, cooldown)}
-        className="px-3 py-2 bg-indigo-600 rounded"
-      >
-        Add / Update
-      </button>
-      <datalist id="tiktok-gifts">
-        <option value="Star" />
-        <option value="Rose" />
-        <option value="Let 'Em Cook" />
-        <option value="GG" />
-        <option value="Game Controller" />
-        <option value="Heart Superstage" />
-        <option value="Heart Stage" />
-        <option value="Heart It Out" />
-        <option value="iHeart You" />
-        <option value="Golden Gamepad" />
-        <option value="I'm New Here" />
-        <option value="Hi Friend" />
-      </datalist>
-    </div>
-  );
-}
 
 

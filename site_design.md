@@ -60,7 +60,15 @@ graph TD
    - Occupies right grid area.
    - Stream preview window with rounded corners.
    - Chat overlay with translucent dark background.
-4. **Footer**
+4. **LikeCounter** (`<LikeCounter />`)
+   - Renders inside the LiveFeedSection header.
+   - Shows big red heart icon + total like count (`text-4xl`, color `#FE2C55`).
+   - `aria-live="polite"` so screen readers announce updates.
+5. **LikeTriggerPanel** (`<LikeTriggerPanel />`)
+   - Fixed at bottom-right of the Live Feed area (or collapsible drawer on mobile).
+   - Lets users add “Every N likes → press key” rules.
+   - Minimal UI: list of triggers, Add / Remove buttons, reset counts.
+6. **Footer**
    - Minimal; copyright notice & version.
 
 ## 5. Interaction & Animations
