@@ -51,6 +51,12 @@ GameState GameStateDetector::getCurrentState() const {
     return currentState.load();
 }
 
+// Force a single detection/update pass
+void GameStateDetector::detectOnce() {
+    GameState newState = detectGameState();
+    updateState(newState);
+}
+
 // Setup Bakkesmod hooks for match events
 void GameStateDetector::setupMatchHooks() {
     if (!bakkesModPlugin) return;

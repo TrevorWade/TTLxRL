@@ -136,6 +136,8 @@ void GameStatePlugin::setupEventHooks() {
 		
 		// Check state every 60 ticks (roughly 1 second at 60fps)
 		if (tickCount % 60 == 0) {
+			// Force one detection/update pass before reading
+			gameStateDetector->detectOnce();
 			GameState newState = gameStateDetector->getCurrentState();
 			if (newState != currentState) {
 				cvarManager->log("State change detected via tick hook: " + gameStateToString(currentState) + " -> " + gameStateToString(newState));

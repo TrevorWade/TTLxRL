@@ -22,6 +22,7 @@ public:
     void startDetection(bool usePolling = true, int pollingIntervalMs = 200);
     void stopDetection();
     GameState getCurrentState() const;
+    void detectOnce();
 
     // Hook setup methods
     void setupMatchHooks();
