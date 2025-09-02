@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"C:/apps/ttl_rl/plugin/build/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

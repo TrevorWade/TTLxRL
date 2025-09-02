@@ -1,3 +1,0 @@
-C:/apps/ttl_rl/plugin/build/CMakeFiles/GameStatePlugin.dir
-C:/apps/ttl_rl/plugin/build/CMakeFiles/ALL_BUILD.dir
-C:/apps/ttl_rl/plugin/build/CMakeFiles/ZERO_CHECK.dir
