@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { searchGifts } from '../services/giftCatalog';
 
 /**
  * GiftSelector - Beautiful visual gift selection modal
@@ -17,9 +16,18 @@ export default function GiftSelector({
   const searchInputRef = useRef(null);
   const modalRef = useRef(null);
 
-  // Filter gifts based on search query
+  // Filter gifts based on search query (simple contains)
   useEffect(() => {
-    setFilteredGifts(searchGifts(giftCatalog, searchQuery));
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) {
+      setFilteredGifts(giftCatalog);
+    } else {
+      setFilteredGifts(
+        giftCatalog.filter(g =>
+          g.name?.toLowerCase().includes(q) || g.description?.toLowerCase().includes(q)
+        )
+      );
+    }
   }, [giftCatalog, searchQuery]);
 
   // Auto-focus search input when modal opens

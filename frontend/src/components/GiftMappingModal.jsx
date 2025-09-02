@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import GiftSelector from './GiftSelector';
 
 /**
  * GiftMappingModal provides a clean, focused interface for adding/editing gift mappings
@@ -9,9 +8,6 @@ export default function GiftMappingModal({
   isOpen,
   onClose,
   onSave,
-  giftCatalog,
-  catalogLoading,
-  onRefreshCatalog,
   editingMapping = null // { gift, config } for editing
 }) {
   const [selectedGift, setSelectedGift] = useState(null);
@@ -157,17 +153,9 @@ export default function GiftMappingModal({
                     value={giftName}
                     onChange={(e) => setGiftName(e.target.value)}
                   />
-                  {!catalogLoading && giftCatalog.length > 0 && (
-                    <button
-                      onClick={() => setShowGiftSelector(true)}
-                      className="px-4 py-3 bg-tiktok-cyan hover:bg-tiktok-cyan/80 text-black font-medium rounded-lg transition-colors"
-                    >
-                      Browse Gifts
-                    </button>
-                  )}
                 </div>
                 <p className="text-xs text-gray-500">
-                  Type a gift name or browse the catalog to see available gifts with images
+                  Type the exact TikTok gift name you want to map.
                 </p>
               </div>
             )}
@@ -277,14 +265,6 @@ export default function GiftMappingModal({
           </div>
         </div>
 
-        {/* Gift Selector Modal */}
-        <GiftSelector
-          isOpen={showGiftSelector}
-          onClose={() => setShowGiftSelector(false)}
-          onSelectGift={handleGiftSelect}
-          giftCatalog={giftCatalog}
-          onRefreshCatalog={onRefreshCatalog}
-        />
       </div>
     </div>
   );

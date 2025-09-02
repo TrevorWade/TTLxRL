@@ -117,6 +117,11 @@ function LiveFeedCard({ event }) {
         <div className="text-gray-300 truncate text-xs mt-1">
           sent <span className="text-tiktok-cyan font-medium">"{event.gift}"</span>
         </div>
+        {event.focusWarning && (
+          <div className="inline-block mt-2 text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 border border-yellow-500/40 text-yellow-300">
+            Focus warning: Active window is not "{event.focusMessage}"
+          </div>
+        )}
       </div>
       
       {/* Count Badge */}

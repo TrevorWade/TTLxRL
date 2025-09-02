@@ -12,7 +12,8 @@ export default function GlobalControlBar({
   setProfileName,
   onSaveProfile,
   onLoadProfile,
-  onDeleteProfile
+  onDeleteProfile,
+  onClearProfile
 }) {
   const [showProfiles, setShowProfiles] = useState(false);
 
@@ -43,6 +44,18 @@ export default function GlobalControlBar({
 
         {/* Right Side - Profile Controls */}
         <div className="flex items-center gap-2">
+          {/* Clear Profile Button */}
+          <button
+            onClick={onClearProfile}
+            className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors flex items-center gap-2"
+            title="Clear current profile and mappings"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7h6m-7 0a1 1 0 01-1-1V5a1 1 0 011-1h6a1 1 0 011 1v1m-7 0h8" />
+            </svg>
+            <span className="hidden sm:inline">Clear</span>
+          </button>
+
           <button
             onClick={() => setShowProfiles(!showProfiles)}
             className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors flex items-center gap-2"

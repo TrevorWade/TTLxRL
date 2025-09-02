@@ -39,4 +39,8 @@ export function send(msg: any) {
   }
 }
 
+export function setTargetWindow(keyword: string) {
+  send({ type: 'set-target-window', keyword });
+}
+
 

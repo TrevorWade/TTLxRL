@@ -32,6 +32,7 @@ add_library(${PLUGIN_NAME} SHARED ${SOURCES} ${HEADERS})
 target_include_directories(${PLUGIN_NAME} PRIVATE
     src
     ${CMAKE_SOURCE_DIR}/bakkesmodsdk/include
+    ${CMAKE_SOURCE_DIR}/bakkesmodsdk/BakkesModSDK-master/include
 )
 
 # Link required libraries

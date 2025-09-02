@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { send } from '../ws';
 
 /**
@@ -18,6 +18,7 @@ export default function CompactTikTokConnection({
   });
   const [isExpanded, setIsExpanded] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const wrapperRef = useRef(null);
 
   // Update input when username changes externally
   useEffect(() => {
@@ -37,6 +38,19 @@ export default function CompactTikTokConnection({
   useEffect(() => {
     setIsConnecting(connectionStatus === 'connecting');
   }, [connectionStatus]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!isExpanded) return;
+    const onDocClick = (e) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(e.target)) {
+        setIsExpanded(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick, true);
+    return () => document.removeEventListener('mousedown', onDocClick, true);
+  }, [isExpanded]);
 
   const handleConnect = async () => {
     const cleanUsername = inputUsername.replace('@', '').trim();
@@ -102,7 +116,7 @@ export default function CompactTikTokConnection({
   // If connected, show compact status display
   if (connectionStatus === 'connected') {
     return (
-      <div className="relative">
+      <div className="relative" ref={wrapperRef}>
         <button
           onClick={() => setIsExpanded(!isExpanded)}
           className="flex items-center gap-2 px-3 py-2 bg-tiktok-gray/80 hover:bg-tiktok-gray rounded-lg transition-colors border border-gray-600"
@@ -143,10 +157,7 @@ export default function CompactTikTokConnection({
 
         {/* Click outside to close for connected state */}
         {isExpanded && (
-          <div 
-            className="fixed inset-0 z-40" 
-            onClick={() => setIsExpanded(false)}
-          ></div>
+          <div className="fixed inset-0 z-40"></div>
         )}
       </div>
     );
@@ -154,7 +165,7 @@ export default function CompactTikTokConnection({
 
   // If not connected, show compact input
   return (
-    <div className="relative">
+    <div className="relative" ref={wrapperRef}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex items-center gap-2 px-3 py-2 bg-tiktok-gray/50 hover:bg-tiktok-gray/80 rounded-lg transition-colors border border-gray-600"
@@ -221,10 +232,7 @@ export default function CompactTikTokConnection({
 
       {/* Click outside to close */}
       {isExpanded && (
-        <div 
-          className="fixed inset-0 z-40" 
-          onClick={() => setIsExpanded(false)}
-        ></div>
+        <div className="fixed inset-0 z-40"></div>
       )}
     </div>
   );
