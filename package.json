@@ -6,7 +6,7 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace frontend & npm start --workspace backend",
+    "dev": "run-p frontend backend",
     "backend": "npm start --workspace backend",
     "frontend": "npm run dev --workspace frontend"
   },
