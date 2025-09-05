@@ -234,7 +234,13 @@ export default function App() {
   function saveCurrentAsProfile() {
     const name = profileName.trim();
     if (!name) return;
-    const next = { ...profiles, [name]: mapping };
+    // Persist both gift mappings and like triggers for this profile
+    // Note: We reset firedCount to 0 when saving to avoid carrying over session counts
+    const profileData = {
+      mapping,
+      likeTriggers: likeTriggers.map(t => ({ ...t, firedCount: 0 }))
+    };
+    const next = { ...profiles, [name]: profileData };
     persistProfiles(next);
     localStorage.setItem(LAST_PROFILE_KEY, name);
   }
@@ -244,8 +250,18 @@ export default function App() {
     if (!data) return;
     setProfileName(name);
     localStorage.setItem(LAST_PROFILE_KEY, name);
-    // Clone to ensure state updates even if same object reference
-    setMapping({ ...data });
+    // Backward compatibility: older profiles may have stored just the mapping object
+    if (data && typeof data === 'object' && ('mapping' in data || 'likeTriggers' in data)) {
+      // New format: { mapping, likeTriggers }
+      setMapping({ ...(data.mapping || {}) });
+      const triggers = Array.isArray(data.likeTriggers) ? data.likeTriggers : [];
+      // Reset fired counts on load so triggers start fresh
+      setLikeTriggers(triggers.map(t => ({ ...t, firedCount: 0 })));
+    } else {
+      // Old format: data is the mapping object
+      setMapping({ ...data });
+      setLikeTriggers([]);
+    }
   }
 
   function deleteProfile(name) {
