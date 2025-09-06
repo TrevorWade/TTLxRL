@@ -31,11 +31,11 @@ IF NOT EXIST backend\.env (
   ) > backend\.env
 )
 
-REM ---- Start frontend in new window ----
-start "TTL_RL Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
+REM ---- Start frontend in the same window (background) ----
+start /b "TTL_RL Frontend" cmd /c "cd /d %~dp0frontend & npm run dev"
 
-REM ---- Start backend in new window ----
-start "TTL_RL Backend" cmd /k "cd /d %~dp0backend && npm start"
+REM ---- Start backend in the same window (background) ----
+start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend & npm start"
 
 REM ---- Wait a moment for servers to start, then open browser ----
 timeout /t 3 /nobreak >nul
@@ -46,7 +46,7 @@ echo ============================================
 echo  Both servers starting...                  
 echo  FRONTEND : http://localhost:5173           
 echo  BACKEND  : ws://localhost:5178            
-echo  Close windows to stop them.               
+echo  Close this window to stop them.               
 echo ============================================
 echo.
 pause

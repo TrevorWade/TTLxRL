@@ -1,9 +1,23 @@
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
 // Keep a global reference of the window object
 // If you don't, the window will be closed automatically when the JavaScript object is garbage collected
 let mainWindow;
+
+function startBackend() {
+  try {
+    const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+    const backendEntry = isDev
+      ? path.join(__dirname, '../../backend/index.js')
+      : path.join(process.resourcesPath, 'backend', 'index.js');
+    require(backendEntry);
+    console.log('Backend started from:', backendEntry);
+  } catch (err) {
+    console.error('Failed to start backend:', err);
+  }
+}
 
 function createWindow() {
   // Create the browser window with modern settings
@@ -36,7 +50,9 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   } else {
     // Production: load from built files
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    const indexPath = path.join(__dirname, '../dist/index.html');
+    console.log('Loading from:', indexPath);
+    mainWindow.loadFile(indexPath);
   }
 
   // Show window when ready to prevent visual flash
@@ -59,7 +75,36 @@ function createWindow() {
 
 // This method will be called when Electron has finished initialization
 // and is ready to create browser windows
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  startBackend();
+  createWindow();
+  try {
+    autoUpdater.autoDownload = true;
+    autoUpdater.checkForUpdatesAndNotify();
+
+    autoUpdater.on('update-available', () => {
+      if (mainWindow) {
+        mainWindow.webContents.send('update-available');
+      }
+    });
+
+    autoUpdater.on('update-downloaded', () => {
+      const choice = dialog.showMessageBoxSync({
+        type: 'question',
+        buttons: ['Restart now', 'Later'],
+        title: 'Update ready',
+        message: 'A new version has been downloaded. Restart to apply?',
+        defaultId: 0,
+        cancelId: 1
+      });
+      if (choice === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  } catch (e) {
+    console.error('Auto-update initialization failed:', e);
+  }
+});
 
 // Quit when all windows are closed
 app.on('window-all-closed', () => {

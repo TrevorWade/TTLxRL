@@ -6,7 +6,6 @@ import GiftMappingTable from './GiftMappingTable';
 import LikeTriggerModal from './LikeTriggerModal';
 import LikeTriggerList from './LikeTriggerList';
 import FloatingActionButton from './FloatingActionButton';
-import { fetchGiftCatalog } from '../services/giftCatalog';
 
 /**
  * CleanMappingSection provides a modern, tabbed interface for gift mappings and like triggers
@@ -21,6 +20,7 @@ export function CleanMappingSection({
   onSaveProfile,
   onLoadProfile,
   onDeleteProfile,
+  onClearProfile,
   onTestGift,
   paused,
   onTogglePause,
@@ -31,8 +31,7 @@ export function CleanMappingSection({
   onRemoveLikeTrigger,
   onResetTriggerCounts
 }) {
-  const [giftCatalog, setGiftCatalog] = useState([]);
-  const [catalogLoading, setCatalogLoading] = useState(true);
+  // Removed gift catalog usage; mappings rely only on real TikTok gifts seen live
   
   // Modal states
   const [showGiftModal, setShowGiftModal] = useState(false);
@@ -40,23 +39,7 @@ export function CleanMappingSection({
   const [editingGift, setEditingGift] = useState(null);
   const [editingLike, setEditingLike] = useState(null);
 
-  // Load gift catalog on mount
-  useEffect(() => {
-    loadCatalog();
-  }, []);
-
-  async function loadCatalog(forceRefresh = false) {
-    try {
-      setCatalogLoading(true);
-      const catalog = await fetchGiftCatalog(forceRefresh);
-      setGiftCatalog(catalog);
-      console.log(`Loaded ${catalog.length} gifts to catalog`);
-    } catch (error) {
-      console.error('Failed to load gift catalog:', error);
-    } finally {
-      setCatalogLoading(false);
-    }
-  }
+  // Catalog removed: no loading or static/icon placeholders anymore
   
   function upsertMapping(giftName, key, durationSec, cooldownMs, imageUrl = null) {
     const gift = giftName.toLowerCase().trim();
@@ -127,6 +110,7 @@ export function CleanMappingSection({
         onSaveProfile={onSaveProfile}
         onLoadProfile={onLoadProfile}
         onDeleteProfile={onDeleteProfile}
+        onClearProfile={onClearProfile}
       />
 
       {/* Tabbed Content */}
@@ -183,9 +167,6 @@ export function CleanMappingSection({
         isOpen={showGiftModal}
         onClose={() => setShowGiftModal(false)}
         onSave={handleSaveGift}
-        giftCatalog={giftCatalog}
-        catalogLoading={catalogLoading}
-        onRefreshCatalog={() => loadCatalog(true)}
         editingMapping={editingGift}
       />
 

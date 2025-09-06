@@ -6,23 +6,29 @@ import Footer from './Footer';
  * Desktop: 60% mapping, 40% live feed side by side
  * Tablet/Mobile: Stacked layout for better usability
  */
-export default function MainLayout({ 
-  children, 
-  connectionStatus, 
-  connectedUsername, 
-  connectionError, 
+export default function MainLayout({
+  children,
+  connectionStatus,
+  connectedUsername,
+  connectionError,
   isLive,
-  onConnectionChange 
+  onConnectionChange,
+  stackingEnabled,
+  onStackingModeChange,
+  targetWindowKeyword
 }) {
   return (
     <div className="min-h-screen bg-tiktok-black font-tiktok flex flex-col">
       {/* Header with TikTok branding */}
-      <Header 
+      <Header
         connectionStatus={connectionStatus}
         connectedUsername={connectedUsername}
         connectionError={connectionError}
         isLive={isLive}
         onConnectionChange={onConnectionChange}
+        stackingEnabled={stackingEnabled}
+        onStackingModeChange={onStackingModeChange}
+        targetWindowKeyword={targetWindowKeyword}
       />
       
       {/* Main content area with responsive grid */}

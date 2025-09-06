@@ -8,12 +8,11 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const http = require('http');
-const url = require('url');
+// HTTP server removed: no static gift catalog or fallback endpoints
 const injectionMode = String(process.env.INJECTION_MODE || 'nodesender').toLowerCase();
 let currentInjectionMode = injectionMode; // can be changed at runtime via WS
-// Optional focus guard to avoid sending keys to the wrong window
-const targetWindowKeyword = (process.env.TARGET_WINDOW_KEYWORD || '').toLowerCase();
+// Optional focus guard to avoid sending keys to the wrong window (runtime-settable)
+let targetWindowKeyword = (process.env.TARGET_WINDOW_KEYWORD || '').toLowerCase();
 
 // In-memory mapping: { [giftNameLower]: { key: 'a', durationMs: 500 } }
 let giftToAction = {};
@@ -23,12 +22,20 @@ const lastFiredAtByGift = {};
 // Track total likes count
 let totalLikes = 0;
 
-// Cache for TikTok gift catalog
-let giftCatalogCache = null;
-let catalogCacheTimestamp = 0;
+// Gift stacking configuration
+const GIFT_STACKING_WINDOW_MS = 2000; // 2 seconds to accumulate gifts
+let giftStackingEnabled = true; // Global toggle
+
+// Stacking state: { [giftNameLower]: { count, lastReceived, timeoutId } }
+let giftStacks = {};
 
 // Dynamic gift catalog collected from live events
 let dynamicGiftCatalog = new Map(); // giftName -> { id, name, imageUrl, diamondCount, lastSeen }
+// Track in-progress streak counts to compute accurate deltas for streakable gifts
+const streakLastCountByPair = new Map(); // `${sender}|${gift}` -> last repeatCount
+
+// Global action queue to ensure sequential execution of gift actions
+let giftActionQueue = Promise.resolve();
 
 // 1) WebSocket server for frontend ↔ backend sync
 const port = Number(process.env.WS_PORT || 5178);
@@ -76,16 +83,18 @@ wss.on('connection', (ws) => {
   console.log('🔌 New WebSocket client connected');
   
   // Send current state to new client
-  ws.send(JSON.stringify({ 
-    type: 'init', 
-    mapping: giftToAction, 
-    paused: isPaused, 
-    injectionMode: currentInjectionMode, 
+  ws.send(JSON.stringify({
+    type: 'init',
+    mapping: giftToAction,
+    paused: isPaused,
+    injectionMode: currentInjectionMode,
+    stackingEnabled: giftStackingEnabled,
     totalLikes,
     connectionStatus,
     username,
     connectionError,
-    isLive
+    isLive,
+    targetWindowKeyword
   }));
 
   ws.on('message', async (raw) => {
@@ -108,13 +117,16 @@ wss.on('connection', (ws) => {
         // For Test Mode: simulate receiving a gift by name
         const giftName = String(msg.giftName || '').toLowerCase();
         const delayMs = Number(msg.delayMs || 0);
+        const countInc = Math.max(1, Number(msg.countInc || 1));
         if (delayMs > 0) {
           console.log(`[TEST] Simulate gift: ${giftName} in ${delayMs}ms`);
           await new Promise((r) => setTimeout(r, delayMs));
         } else {
           console.log(`[TEST] Simulate gift: ${giftName}`);
         }
-        handleGiftByName(giftName, 'TestUser');
+        giftActionQueue = giftActionQueue
+          .then(() => handleGiftByName(giftName, 'TestUser', countInc))
+          .catch((err) => console.error('Test gift action error:', err));
       }
 
       if (msg.type === 'test-like-trigger') {
@@ -187,6 +199,26 @@ wss.on('connection', (ws) => {
           currentInjectionMode = mode;
           broadcast({ type: 'injection-mode-updated', mode });
         }
+      }
+
+      if (msg.type === 'set-stacking-mode') {
+        giftStackingEnabled = !!msg.enabled;
+        console.log(`📚 Gift stacking ${giftStackingEnabled ? 'enabled' : 'disabled'}`);
+        broadcast({ type: 'stacking-mode-updated', enabled: giftStackingEnabled });
+
+        // Clear all active stacks if stacking is disabled
+        if (!giftStackingEnabled) {
+          for (const giftName in giftStacks) {
+            clearGiftStack(giftName);
+          }
+        }
+      }
+
+      if (msg.type === 'set-target-window') {
+        const keyword = String(msg.keyword || '').trim().toLowerCase();
+        targetWindowKeyword = keyword;
+        console.log(`🎯 Target window keyword set to: "${targetWindowKeyword}"`);
+        broadcast({ type: 'target-window-updated', keyword: targetWindowKeyword });
       }
 
       if (msg.type === 'like-key') {
@@ -433,18 +465,37 @@ function setupTikTokEventListeners() {
     console.log(`Added gift to dynamic catalog: ${displayName} with image: ${imageUrl ? 'YES' : 'NO'}`);
   }
   
-  // Handle streak gifts: for streakable gifts (giftType===1), ignore interim events until repeatEnd
+  // Compute accurate count increment using streak delta logic
   const giftType = Number(data?.giftType);
   const repeatEnd = Boolean(data?.repeatEnd);
-  if (giftType === 1 && repeatEnd === false) {
-    // Streak in progress; wait for final event to avoid overcounting
-    return;
+  let countInc = 1;
+  if (giftType === 1) {
+    const currentCount = Math.max(1, Number(data?.repeatCount || 1));
+    const pairKey = `${String(senderName).toLowerCase()}|${giftName}`;
+    const prev = streakLastCountByPair.get(pairKey) || 0;
+    const delta = currentCount - prev;
+    if (delta <= 0) {
+      // No new gifts since last event; ignore duplicate/end events
+      if (repeatEnd) streakLastCountByPair.delete(pairKey);
+      else streakLastCountByPair.set(pairKey, currentCount);
+      return;
+    }
+    countInc = delta;
+    if (repeatEnd) {
+      streakLastCountByPair.delete(pairKey);
+    } else {
+      streakLastCountByPair.set(pairKey, currentCount);
+    }
   }
-  const countInc = giftType === 1 ? Number(data?.repeatCount || 1) : 1;
-  console.log(`Gift received: ${giftName} from ${senderName}`);
+  console.log(`Gift received: ${giftName} from ${senderName} (+${countInc})`);
   broadcast({ type: 'gift', giftName, sender: senderName, imageUrl, ts, countInc });
 
-    handleGiftByName(giftName, senderName);
+    // Enqueue this gift action to run after prior ones complete
+    giftActionQueue = giftActionQueue
+      .then(() => handleGiftByName(giftName, senderName, countInc))
+      .catch((err) => {
+        console.error('Gift action error:', err);
+      });
   });
 
   // Like event listener for tracking total likes
@@ -550,7 +601,320 @@ if (username) {
 }
 
 // 3) Macro engine
-async function handleGiftByName(giftNameLower, senderName) {
+
+// Gift stacking helper functions
+function startGiftStack(giftNameLower, count = 1) {
+  if (!giftStackingEnabled) return;
+
+  const action = giftToAction[giftNameLower];
+  if (!action || !action.stacking?.enabled) return;
+
+  const stackingConfig = action.stacking;
+  const windowMs = stackingConfig.windowMs || GIFT_STACKING_WINDOW_MS;
+  const maxStack = stackingConfig.maxStack || 0; // 0 = unlimited
+
+  if (giftStacks[giftNameLower]) {
+    // Update existing stack
+    const existing = giftStacks[giftNameLower];
+    const newCount = existing.count + count;
+
+    // Check max stack limit
+    if (maxStack > 0 && newCount > maxStack) {
+      console.log(`Stack limit reached for "${giftNameLower}": ${newCount}/${maxStack}, processing immediately`);
+      clearTimeout(existing.timeoutId);
+      delete giftStacks[giftNameLower];
+      processGiftStack(giftNameLower, newCount);
+      return;
+    }
+
+    existing.count = newCount;
+    existing.lastReceived = Date.now();
+
+    // Clear existing timeout and set new one
+    clearTimeout(existing.timeoutId);
+    existing.timeoutId = setTimeout(() => {
+      processGiftStack(giftNameLower);
+    }, windowMs);
+
+    console.log(`📚 Stack updated: "${giftNameLower}" (${existing.count})`);
+  } else {
+    // Create new stack
+    const timeoutId = setTimeout(() => {
+      processGiftStack(giftNameLower);
+    }, windowMs);
+
+    giftStacks[giftNameLower] = {
+      count: count,
+      lastReceived: Date.now(),
+      timeoutId: timeoutId
+    };
+
+    console.log(`📚 New stack started: "${giftNameLower}" (${count})`);
+  }
+
+  // Broadcast stacking update
+  broadcast({
+    type: 'gift-stack-update',
+    giftName: giftNameLower,
+    currentCount: giftStacks[giftNameLower].count,
+    maxStack: maxStack,
+    stackingWindow: windowMs
+  });
+}
+
+async function processGiftStack(giftNameLower, overrideCount = null) {
+  const stack = giftStacks[giftNameLower];
+  if (!stack) return;
+
+  const count = overrideCount || stack.count;
+  clearTimeout(stack.timeoutId);
+  delete giftStacks[giftNameLower];
+
+  const action = giftToAction[giftNameLower];
+  if (!action) return;
+
+  console.log(`🎯 Processing stack: "${giftNameLower}" x${count}`);
+
+  const stackingConfig = action.stacking || {};
+  const mode = stackingConfig.mode || 'cumulative_hold'; // Default to cumulative_hold for better UX
+
+  if (mode === 'batch') {
+    await processGiftStackBatch(giftNameLower, count, action);
+  } else if (mode === 'sequential') {
+    await processGiftStackSequential(giftNameLower, count, action);
+  } else if (mode === 'cumulative_hold') {
+    await processGiftStackCumulativeHold(giftNameLower, count, action);
+  } else {
+    // Fallback to cumulative hold as default
+    await processGiftStackCumulativeHold(giftNameLower, count, action);
+  }
+
+  // Broadcast stack completion
+  broadcast({
+    type: 'gift-stack-complete',
+    giftName: giftNameLower,
+    processedCount: count
+  });
+}
+
+async function processGiftStackSequential(giftNameLower, count, action) {
+  for (let i = 0; i < count; i++) {
+    console.log(`🔄 Processing gift ${i + 1}/${count}: "${giftNameLower}"`);
+    await executeGiftAction(giftNameLower, action, `Stack-${i + 1}`);
+
+    // Small delay between actions to prevent overwhelming the system
+    if (i < count - 1) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+}
+
+async function processGiftStackBatch(giftNameLower, count, action) {
+  const key = String(action.key || '').toLowerCase();
+  const durationMs = action.durationSec != null ?
+    Math.max(0, Number(action.durationSec) * 1000) :
+    Number(action.durationMs || 300);
+
+  console.log(`⚡ Batch processing: "${giftNameLower}" x${count} (${key})`);
+
+  if (currentInjectionMode === 'autohotkey') {
+    await processGiftStackBatchAhk(giftNameLower, count, key, durationMs);
+  } else {
+    await processGiftStackBatchNodesender(giftNameLower, count, key, durationMs);
+  }
+
+  lastFiredAtByGift[giftNameLower] = Date.now();
+}
+
+async function processGiftStackCumulativeHold(giftNameLower, count, action) {
+  const key = String(action.key || '').toLowerCase();
+  const singleDurationMs = action.durationSec != null ?
+    Math.max(0, Number(action.durationSec) * 1000) :
+    Number(action.durationMs || 300);
+  const totalDurationMs = singleDurationMs * count;
+
+  console.log(`🎯 Cumulative hold: "${giftNameLower}" x${count} (${key}) for ${totalDurationMs}ms total`);
+
+  try {
+    // Execute the key hold for the cumulative duration
+    if (currentInjectionMode === 'autohotkey') {
+      const ahkPath = process.env.AHK_PATH || 'AutoHotkey.exe';
+      const ahkKey = mapKeyToAhk(key);
+      const titleMatch = targetWindowKeyword;
+
+      const v2script = buildAhkHoldScriptV2(ahkKey, totalDurationMs, titleMatch);
+      const v1script = buildAhkHoldScriptV1(ahkKey, totalDurationMs, titleMatch);
+
+      const tmpV2 = path.join(os.tmpdir(), `ttlrl_cumulative_${Date.now()}_${Math.random().toString(36).slice(2)}_v2.ahk`);
+      fs.writeFileSync(tmpV2, v2script, 'utf8');
+      const v2ok = await runAhk(ahkPath, tmpV2);
+      try { fs.unlinkSync(tmpV2); } catch {}
+      if (!v2ok) {
+        const tmpV1 = path.join(os.tmpdir(), `ttlrl_cumulative_${Date.now()}_${Math.random().toString(36).slice(2)}_v1.ahk`);
+        fs.writeFileSync(tmpV1, v1script, 'utf8');
+        await runAhk(ahkPath, tmpV1);
+        try { fs.unlinkSync(tmpV1); } catch {}
+      }
+    } else {
+      // Default to nodesender - hold for total duration
+      sender.startBatch();
+      sender.batchTypeKey(key, 0, sender.BATCH_EVENT_KEY_DOWN);
+      sender.batchTypeKey(key, totalDurationMs, sender.BATCH_EVENT_KEY_UP);
+      await sender.sendBatch();
+    }
+
+    lastFiredAtByGift[giftNameLower] = Date.now();
+  } catch (err) {
+    console.error('Cumulative hold error:', err);
+  }
+}
+
+async function processGiftStackBatchAhk(giftNameLower, count, key, durationMs) {
+  const ahkPath = process.env.AHK_PATH || 'AutoHotkey.exe';
+  const ahkKey = mapKeyToAhk(key);
+  const titleMatch = targetWindowKeyword;
+
+  // Build a script that presses the key multiple times with minimal delay
+  const lines = [];
+  lines.push('#SingleInstance Force');
+  lines.push('SendMode "Input"');
+  lines.push('SetKeyDelay -1, -1');
+
+  if (titleMatch) {
+    lines.push(`title := "${titleMatch}"`);
+    lines.push('h := WinExist(title)');
+    lines.push('if (h) {');
+    lines.push('  WinActivate "ahk_id " h');
+    lines.push('  WinWaitActive "ahk_id " h,,1');
+    lines.push('}');
+  }
+
+  // Rapid key presses
+  for (let i = 0; i < count; i++) {
+    lines.push(`Send "{${ahkKey} down}"`);
+    lines.push(`Sleep ${Math.max(1, Math.floor(durationMs))}`);
+    lines.push(`Send "{${ahkKey} up}"`);
+    if (i < count - 1) {
+      lines.push('Sleep 10'); // 10ms delay between presses
+    }
+  }
+
+  lines.push('ExitApp');
+
+  const tmp = path.join(os.tmpdir(), `ttlrl_stack_${Date.now()}_${Math.random().toString(36).slice(2)}.ahk`);
+  fs.writeFileSync(tmp, lines.join('\n'), 'utf8');
+  await runAhk(ahkPath, tmp);
+  try { fs.unlinkSync(tmp); } catch {}
+}
+
+async function processGiftStackBatchNodesender(giftNameLower, count, key, durationMs) {
+  sender.startBatch();
+
+  for (let i = 0; i < count; i++) {
+    const delay = i === 0 ? 0 : 10; // 10ms delay between presses
+    sender.batchTypeKey(key, delay, sender.BATCH_EVENT_KEY_DOWN);
+    sender.batchTypeKey(key, durationMs, sender.BATCH_EVENT_KEY_UP);
+  }
+
+  await sender.sendBatch();
+}
+
+function clearGiftStack(giftNameLower) {
+  const stack = giftStacks[giftNameLower];
+  if (stack) {
+    clearTimeout(stack.timeoutId);
+    delete giftStacks[giftNameLower];
+    console.log(`🗑️ Stack cleared: "${giftNameLower}"`);
+  }
+}
+
+// Execute a single gift action (extracted from handleGiftByName)
+async function executeGiftAction(giftNameLower, action, senderName) {
+  const key = String(action.key || '').toLowerCase();
+  const durationMs = action.durationSec != null ?
+    Math.max(0, Number(action.durationSec) * 1000) :
+    Number(action.durationMs || 300);
+
+  const isMouseRight = key === 'right_click' || key === 'mouse_right' || key === 'rmouse';
+  const isMouseLeft = key === 'left_click' || key === 'mouse_left' || key === 'lmouse';
+
+  try {
+    // Mouse support
+    if (isMouseRight || isMouseLeft) {
+      const mouseButtonConst = isMouseRight ? sender.BUTTON_RIGHT : sender.BUTTON_LEFT;
+      const ahkKey = isMouseRight ? 'RButton' : 'LButton';
+
+      if (currentInjectionMode === 'autohotkey') {
+        const ahkPath = process.env.AHK_PATH || 'AutoHotkey.exe';
+        const titleMatch = targetWindowKeyword;
+
+        const v2script = buildAhkHoldScriptV2(ahkKey, durationMs, titleMatch);
+        const v1script = buildAhkHoldScriptV1(ahkKey, durationMs, titleMatch);
+
+        const tmpV2 = path.join(os.tmpdir(), `ttlrl_mouse_${Date.now()}_${Math.random().toString(36).slice(2)}_v2.ahk`);
+        fs.writeFileSync(tmpV2, v2script, 'utf8');
+        const v2ok = await runAhk(ahkPath, tmpV2);
+        try { fs.unlinkSync(tmpV2); } catch {}
+        if (!v2ok) {
+          const tmpV1 = path.join(os.tmpdir(), `ttlrl_mouse_${Date.now()}_${Math.random().toString(36).slice(2)}_v1.ahk`);
+          fs.writeFileSync(tmpV1, v1script, 'utf8');
+          await runAhk(ahkPath, tmpV1);
+          try { fs.unlinkSync(tmpV1); } catch {}
+        }
+        return;
+      }
+
+      // nodesender paths
+      if (currentInjectionMode === 'nodesender_repeat') {
+        const intervalMs = Math.max(5, Number(process.env.REPEAT_INTERVAL_MS || action.repeatIntervalMs || 20));
+        const taps = Math.max(1, Math.floor(durationMs / intervalMs));
+        sender.startBatch();
+        for (let i = 0; i < taps; i++) {
+          const wait = i === 0 ? 0 : intervalMs;
+          sender.batchMouseClick(mouseButtonConst, wait);
+        }
+        await sender.sendBatch();
+      } else {
+        // Single hold click
+        sender.startBatch();
+        sender.batchPressMouseButton(mouseButtonConst, 0);
+        sender.batchReleaseMouseButton(mouseButtonConst, durationMs);
+        await sender.sendBatch();
+      }
+      return;
+    }
+
+    // Keyboard support
+    if (currentInjectionMode === 'autohotkey') {
+      const ahkPath = process.env.AHK_PATH || 'AutoHotkey.exe';
+      const ahkKey = mapKeyToAhk(key);
+      const titleMatch = targetWindowKeyword;
+
+      const v2script = buildAhkHoldScriptV2(ahkKey, durationMs, titleMatch);
+      const v1script = buildAhkHoldScriptV1(ahkKey, durationMs, titleMatch);
+
+      const tmpV2 = path.join(os.tmpdir(), `ttlrl_${Date.now()}_${Math.random().toString(36).slice(2)}_v2.ahk`);
+      fs.writeFileSync(tmpV2, v2script, 'utf8');
+      const v2ok = await runAhk(ahkPath, tmpV2);
+      try { fs.unlinkSync(tmpV2); } catch {}
+      if (!v2ok) {
+        const tmpV1 = path.join(os.tmpdir(), `ttlrl_${Date.now()}_${Math.random().toString(36).slice(2)}_v1.ahk`);
+        fs.writeFileSync(tmpV1, v1script, 'utf8');
+        await runAhk(ahkPath, tmpV1);
+        try { fs.unlinkSync(tmpV1); } catch {}
+      }
+    } else {
+      sender.startBatch();
+      sender.batchTypeKey(key, 0, sender.BATCH_EVENT_KEY_DOWN);
+      sender.batchTypeKey(key, durationMs, sender.BATCH_EVENT_KEY_UP);
+      await sender.sendBatch();
+    }
+  } catch (err) {
+    console.error('Key press error:', err);
+  }
+}
+
+async function handleGiftByName(giftNameLower, senderName, countInc = 1) {
   if (isPaused) {
     console.log('Paused; ignoring gift');
     return;
@@ -581,26 +945,41 @@ async function handleGiftByName(giftNameLower, senderName) {
     return;
   }
 
-  // Sequence support
-  if (action && String(action.type || '').toLowerCase() === 'sequence' && Array.isArray(action.steps)) {
-    try {
-      console.log(`Execute sequence for gift "${giftNameLower}" (mode=${currentInjectionMode}) (from ${senderName})`);
-      if (currentInjectionMode === 'autohotkey') {
-        await runAhkSequence(action.steps);
-      } else {
-        await runNodesenderSequence(action.steps);
-      }
-      lastFiredAtByGift[giftNameLower] = Date.now();
-    } catch (err) {
-      console.error('Sequence error:', err);
-    }
+  // Check if stacking is enabled for this gift
+  const stackingConfig = action.stacking;
+  const stackingEnabled = stackingConfig?.enabled && giftStackingEnabled;
+
+  if (stackingEnabled) {
+    // Use stacking system
+    console.log(`📚 Stacking enabled for "${giftNameLower}", adding to stack (+${countInc})`);
+    startGiftStack(giftNameLower, Math.max(1, Number(countInc || 1)));
     return;
   }
 
+  // Original non-stacking logic for backward compatibility
   const key = String(action.key || '').toLowerCase();
 
   const isMouseRight = key === 'right_click' || key === 'mouse_right' || key === 'rmouse';
   const isMouseLeft = key === 'left_click' || key === 'mouse_left' || key === 'lmouse';
+
+  // If multiple gifts counted in this event, execute multiple times (sequential/batch)
+  if (Math.max(1, Number(countInc || 1)) > 1) {
+    try {
+      // Prefer batch processing for keyboard; for mouse, sequential via executeGiftAction
+      const isMouseRight = key === 'right_click' || key === 'mouse_right' || key === 'rmouse';
+      const isMouseLeft = key === 'left_click' || key === 'mouse_left' || key === 'lmouse';
+      if (!isMouseLeft && !isMouseRight) {
+        await processGiftStackBatch(giftNameLower, Math.max(1, Number(countInc || 1)), action);
+      } else {
+        await processGiftStackSequential(giftNameLower, Math.max(1, Number(countInc || 1)), action);
+      }
+      lastFiredAtByGift[giftNameLower] = Date.now();
+      return;
+    } catch (err) {
+      console.error('Multi-count gift processing error:', err);
+      // Fallback to single execution below
+    }
+  }
 
   // Support new durationSec while remaining backward compatible with durationMs
   const durationMs = action.durationSec != null ? Math.max(0, Number(action.durationSec) * 1000) : Number(action.durationMs || 300);
@@ -891,288 +1270,6 @@ async function runNodesenderSequence(steps) {
   await sender.sendBatch();
 }
 
-// Gift Catalog API Functions
-async function fetchGiftCatalogFromTikTok() {
-  try {
-    console.log('Fetching gift catalog from TikTok API...');
-    
-    // Try multiple methods to get gift data
-    let gifts = [];
-    
-    // Method 1: Use existing connected TikTok instance if available
-    if (tiktok && typeof tiktok.getAvailableGifts === 'function') {
-      try {
-        console.log('Trying to fetch gifts from existing connection...');
-        gifts = await tiktok.getAvailableGifts();
-        console.log(`Method 1: Fetched ${gifts.length} gifts from existing connection`);
-      } catch (err) {
-        console.log('Method 1 failed:', err.message);
-      }
-    }
-    
-    // Method 2: Create temporary connection if Method 1 failed
-    if (gifts.length === 0) {
-      try {
-        console.log('Trying temporary connection with username...');
-        const tempConnection = new WebcastPushConnection(username || '@tiktok', {
-          enableExtendedGiftInfo: true,
-        });
-        gifts = await tempConnection.getAvailableGifts();
-        console.log(`Method 2: Fetched ${gifts.length} gifts from temp connection`);
-      } catch (err) {
-        console.log('Method 2 failed:', err.message);
-      }
-    }
-    
-    // Method 3: Try without username as last resort
-    if (gifts.length === 0) {
-      try {
-        console.log('Trying basic connection...');
-        const basicConnection = new WebcastPushConnection();
-        gifts = await basicConnection.getAvailableGifts();
-        console.log(`Method 3: Fetched ${gifts.length} gifts from basic connection`);
-      } catch (err) {
-        console.log('Method 3 failed:', err.message);
-      }
-    }
-    
-    if (gifts.length === 0) {
-      throw new Error('All methods failed to fetch gifts');
-    }
-    
-    // Debug: Log the structure of the first gift to understand the data format
-    if (gifts.length > 0) {
-      console.log('Sample gift structure:', JSON.stringify(gifts[0], null, 2));
-    }
-    
-    // Transform the data to our format with multiple possible field names
-    const catalog = gifts.map(gift => {
-      // Try multiple possible field names for each property
-      const id = gift.id || gift.gift_id || gift.giftId || String(Math.random());
-      const name = gift.name || gift.gift_name || gift.giftName || gift.displayName || 'Unknown Gift';
-      
-      // Try multiple possible image URL locations
-      let imageUrl = null;
-      if (gift.image?.url_list?.[0]) imageUrl = gift.image.url_list[0];
-      else if (gift.icon?.url_list?.[0]) imageUrl = gift.icon.url_list[0];
-      else if (gift.pictureUrl) imageUrl = gift.pictureUrl;
-      else if (gift.picture_url) imageUrl = gift.picture_url;
-      else if (gift.imageUrl) imageUrl = gift.imageUrl;
-      else if (gift.image_url) imageUrl = gift.image_url;
-      else if (gift.thumbnail) imageUrl = gift.thumbnail;
-      
-      const diamondCount = gift.diamond_count || gift.diamondCount || gift.cost || gift.price || 0;
-      const description = gift.description || `${name} - ${diamondCount} diamonds`;
-      
-      return {
-        id: String(id),
-        name,
-        imageUrl,
-        diamondCount,
-        description
-      };
-    });
-    
-    // Filter out any gifts without names
-    const validCatalog = catalog.filter(gift => gift.name && gift.name !== 'Unknown Gift');
-    
-    // Merge with dynamic catalog from live events
-    const dynamicGifts = Array.from(dynamicGiftCatalog.values());
-    const allGifts = new Map();
-    
-    // Add API gifts first
-    validCatalog.forEach(gift => {
-      allGifts.set(gift.name.toLowerCase(), gift);
-    });
-    
-    // Add/override with dynamic gifts (they have real image URLs)
-    dynamicGifts.forEach(gift => {
-      const key = gift.name.toLowerCase();
-      if (!allGifts.has(key) || (gift.imageUrl && !allGifts.get(key).imageUrl)) {
-        allGifts.set(key, gift);
-      }
-    });
-    
-    const mergedCatalog = Array.from(allGifts.values());
-    console.log(`Successfully processed ${mergedCatalog.length} total gifts (${validCatalog.length} from API, ${dynamicGifts.length} from live events)`);
-    
-    // Cache the result
-    giftCatalogCache = mergedCatalog;
-    catalogCacheTimestamp = Date.now();
-    
-    return mergedCatalog;
-    
-  } catch (error) {
-    console.warn('Failed to fetch gift catalog from TikTok:', error.message);
-    console.log('Falling back to enhanced catalog with curated gift data...');
-    
-    // Even if API fails, include any dynamic gifts we've collected
-    const dynamicGifts = Array.from(dynamicGiftCatalog.values());
-    const fallbackGifts = getEnhancedFallbackCatalog();
-    
-    // Merge fallback with dynamic gifts
-    const allGifts = new Map();
-    fallbackGifts.forEach(gift => allGifts.set(gift.name.toLowerCase(), gift));
-    dynamicGifts.forEach(gift => {
-      const key = gift.name.toLowerCase();
-      if (!allGifts.has(key) || gift.imageUrl) {
-        allGifts.set(key, gift);
-      }
-    });
-    
-    const finalCatalog = Array.from(allGifts.values());
-    console.log(`Fallback catalog: ${finalCatalog.length} gifts (${fallbackGifts.length} fallback + ${dynamicGifts.length} dynamic)`);
-    
-    // Cache the result
-    giftCatalogCache = finalCatalog;
-    catalogCacheTimestamp = Date.now();
-    
-    return finalCatalog;
-  }
-}
-
-function getEnhancedFallbackCatalog() {
-  // Enhanced fallback with sample gift data and placeholder images
-  return [
-    {
-      id: 'star',
-      name: 'Star',
-      imageUrl: 'https://img.icons8.com/emoji/48/star-emoji.png',
-      diamondCount: 1,
-      description: 'Basic star gift - spread some sparkle!'
-    },
-    {
-      id: 'rose',
-      name: 'Rose',
-      imageUrl: 'https://img.icons8.com/emoji/48/rose-emoji.png',
-      diamondCount: 1,
-      description: 'Beautiful rose - show your appreciation'
-    },
-    {
-      id: 'letcook',
-      name: "Let 'Em Cook",
-      imageUrl: 'https://img.icons8.com/emoji/48/cooking-emoji.png',
-      diamondCount: 5,
-      description: 'Cooking celebration - let them work!'
-    },
-    {
-      id: 'gg',
-      name: 'GG',
-      imageUrl: 'https://img.icons8.com/emoji/48/trophy-emoji.png',
-      diamondCount: 1,
-      description: 'Good game - respect the play'
-    },
-    {
-      id: 'gamecontroller',
-      name: 'Game Controller',
-      imageUrl: 'https://img.icons8.com/emoji/48/video-game-emoji.png',
-      diamondCount: 10,
-      description: 'Gaming controller - for the gamers'
-    },
-    {
-      id: 'heartsuperstage',
-      name: 'Heart Superstage',
-      imageUrl: 'https://img.icons8.com/emoji/48/red-heart-emoji.png',
-      diamondCount: 100,
-      description: 'Premium heart gift with stage effects'
-    },
-    {
-      id: 'heartstage',
-      name: 'Heart Stage',
-      imageUrl: 'https://img.icons8.com/emoji/48/heart-with-arrow-emoji.png',
-      diamondCount: 50,
-      description: 'Stage heart effect - love with style'
-    },
-    {
-      id: 'heartitout',
-      name: 'Heart It Out',
-      imageUrl: 'https://img.icons8.com/emoji/48/two-hearts-emoji.png',
-      diamondCount: 25,
-      description: 'Heart explosion - maximum love'
-    },
-    {
-      id: 'iheartyou',
-      name: 'iHeart You',
-      imageUrl: 'https://img.icons8.com/emoji/48/heart-with-ribbon-emoji.png',
-      diamondCount: 15,
-      description: 'Love expression - from the heart'
-    },
-    {
-      id: 'goldengamepad',
-      name: 'Golden Gamepad',
-      imageUrl: 'https://img.icons8.com/emoji/48/crown-emoji.png',
-      diamondCount: 500,
-      description: 'Premium gaming gift - for champions'
-    },
-    {
-      id: 'imnewhere',
-      name: "I'm New Here",
-      imageUrl: 'https://img.icons8.com/emoji/48/waving-hand-emoji.png',
-      diamondCount: 1,
-      description: 'Welcome gift - say hello!'
-    },
-    {
-      id: 'hifriend',
-      name: 'Hi Friend',
-      imageUrl: 'https://img.icons8.com/emoji/48/handshake-emoji.png',
-      diamondCount: 1,
-      description: 'Friendly greeting - make connections'
-    }
-  ];
-}
-
-// HTTP Server for API endpoints
-const httpPort = Number(process.env.HTTP_PORT || 3001);
-const server = http.createServer(async (req, res) => {
-  const { pathname } = url.parse(req.url);
-  
-  // CORS headers for frontend
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  if (req.method === 'OPTIONS') {
-    res.statusCode = 200;
-    res.end();
-    return;
-  }
-  
-  // Gift Catalog API
-  if (pathname === '/api/gifts/catalog' && req.method === 'GET') {
-    try {
-      // Check cache first (cache for 1 hour)
-      const cacheAge = Date.now() - catalogCacheTimestamp;
-      const cacheValid = giftCatalogCache && cacheAge < (60 * 60 * 1000);
-      
-      let catalog;
-      if (cacheValid) {
-        console.log('Serving cached gift catalog');
-        catalog = giftCatalogCache;
-      } else {
-        console.log('Fetching fresh gift catalog');
-        catalog = await fetchGiftCatalogFromTikTok();
-      }
-      
-      res.setHeader('Content-Type', 'application/json');
-      res.statusCode = 200;
-      res.end(JSON.stringify(catalog));
-      
-    } catch (error) {
-      console.error('Error serving gift catalog:', error);
-      res.statusCode = 500;
-      res.end(JSON.stringify({ error: 'Failed to fetch gift catalog' }));
-    }
-    return;
-  }
-  
-  // 404 for unknown endpoints
-  res.statusCode = 404;
-  res.end(JSON.stringify({ error: 'Not found' }));
-});
-
-server.listen(httpPort, () => {
-  console.log(`HTTP API server listening on http://localhost:${httpPort}`);
-  console.log(`Gift catalog available at: http://localhost:${httpPort}/api/gifts/catalog`);
-});
+// HTTP server removed; no static catalog endpoints. All data comes from live events.
 
 

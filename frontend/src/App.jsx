@@ -5,24 +5,13 @@ import { CleanMappingSection } from './components/MappingSection';
 import LiveFeedSection from './components/LiveFeedSection';
 import TikTokConnection from './components/TikTokConnection';
 
-function useLocalStorage(key, initialValue) {
-  const [val, setVal] = useState(() => {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : initialValue;
-  });
-  useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(val));
-  }, [key, val]);
-  return [val, setVal];
-}
-
 export default function App() {
   // mapping: { giftNameLower: { key, durationMs } }
-  const [mapping, setMapping] = useLocalStorage('giftMapping', {});
+  const [mapping, setMapping] = useState({});
   const [paused, setPaused] = useState(false);
   // Like count tracking
   const [totalLikes, setTotalLikes] = useState(0);
-  const [likeTriggers, setLikeTriggers] = useLocalStorage('likeTriggers', []);
+  const [likeTriggers, setLikeTriggers] = useState([]);
   // Aggregated feed: map + order per plan
   const [feedMap, setFeedMap] = useState({}); // key -> item
   const [feedOrder, setFeedOrder] = useState([]); // array of keys, newest first
@@ -31,12 +20,15 @@ export default function App() {
   const [connectedUsername, setConnectedUsername] = useState('');
   const [connectionError, setConnectionError] = useState(null);
   const [isLive, setIsLive] = useState(false);
+  // Stacking settings
+  const [stackingEnabled, setStackingEnabled] = useState(true);
+  const [targetWindowKeyword, setTargetWindowKeyword] = useState('');
   const feedMapRef = useRef(feedMap);
   const feedOrderRef = useRef(feedOrder);
   useEffect(() => { feedMapRef.current = feedMap; }, [feedMap]);
   useEffect(() => { feedOrderRef.current = feedOrder; }, [feedOrder]);
-  // Grouping window for aggregation (ms). If events arrive after this window, create a new card
-  const GROUP_WINDOW_MS = 30000; // 30s
+  // Grouping window for aggregation (ms) - merge same sender+gift within 5 seconds
+  const GROUP_WINDOW_MS = 5000;
   const feedRef = useRef(null);
   const seqRef = useRef(0);
 
@@ -50,7 +42,7 @@ export default function App() {
       return {};
     }
   });
-  const [profileName, setProfileName] = useState(() => localStorage.getItem(LAST_PROFILE_KEY) || '');
+  const [profileName, setProfileName] = useState('');
 
   // Keep backend in sync whenever mapping changes
   useEffect(() => {
@@ -62,9 +54,7 @@ export default function App() {
       if (msg.type === 'init') {
         // Pull initial state from backend
         setPaused(!!msg.paused);
-        if (msg.mapping && Object.keys(msg.mapping).length && !Object.keys(mapping).length) {
-          setMapping(msg.mapping);
-        }
+        // Intentionally do not auto-load mapping from backend; start fresh each app load
         // Initialize total likes from backend
         if (typeof msg.totalLikes === 'number') {
           setTotalLikes(msg.totalLikes);
@@ -74,6 +64,13 @@ export default function App() {
         setConnectedUsername(msg.username || '');
         setConnectionError(msg.connectionError || null);
         setIsLive(msg.isLive || false);
+        // Initialize stacking state
+        if (typeof msg.stackingEnabled === 'boolean') {
+          setStackingEnabled(msg.stackingEnabled);
+        }
+        if (typeof msg.targetWindowKeyword === 'string') {
+          setTargetWindowKeyword(msg.targetWindowKeyword || '');
+        }
       }
       if (msg.type === 'gift') {
         const nowTs = Number(msg.ts) || Date.now();
@@ -179,27 +176,26 @@ export default function App() {
         setConnectionError(msg.error || null);
         setIsLive(msg.isLive || false);
       }
+      if (msg.type === 'stacking-mode-updated') {
+        setStackingEnabled(!!msg.enabled);
+      }
+      if (msg.type === 'target-window-updated') {
+        setTargetWindowKeyword(msg.keyword || '');
+      }
       if (msg.type === 'focus-warning') {
-        // Surface a lightweight toast/banner in the feed
-        setFeedOrder((o) => [
-          `focus-${Date.now()}`,
-          ...o
-        ].slice(0, 200));
-        setFeedMap((m) => ({
-          ...m,
-          [`focus-${Date.now()}`]: {
-            id: `focus-${Date.now()}`,
-            pairKey: 'focus-warning',
-            sender: 'Focus warning',
-            gift: `Active window is not "${msg.expected}"`,
-            imageUrl: null,
-            count: 1,
-            firstTime: Date.now(),
-            lastTime: Date.now(),
-            fresh: true,
-            bumpToken: 1,
-          },
-        }));
+        // Attach focus warning badge to the most recent gift card, do not replace content
+        const order = feedOrderRef.current;
+        if (order.length) {
+          const topId = order[0];
+          setFeedMap((m) => {
+            const item = m[topId];
+            if (!item) return m;
+            const updatedItem = { ...item, focusWarning: true, focusMessage: msg.expected || 'Focus warning' };
+            const updated = { ...m, [topId]: updatedItem };
+            feedMapRef.current = updated;
+            return updated;
+          });
+        }
       }
     });
   }, []);
@@ -238,7 +234,13 @@ export default function App() {
   function saveCurrentAsProfile() {
     const name = profileName.trim();
     if (!name) return;
-    const next = { ...profiles, [name]: mapping };
+    // Persist both gift mappings and like triggers for this profile
+    // Note: We reset firedCount to 0 when saving to avoid carrying over session counts
+    const profileData = {
+      mapping,
+      likeTriggers: likeTriggers.map(t => ({ ...t, firedCount: 0 }))
+    };
+    const next = { ...profiles, [name]: profileData };
     persistProfiles(next);
     localStorage.setItem(LAST_PROFILE_KEY, name);
   }
@@ -248,7 +250,18 @@ export default function App() {
     if (!data) return;
     setProfileName(name);
     localStorage.setItem(LAST_PROFILE_KEY, name);
-    setMapping(data);
+    // Backward compatibility: older profiles may have stored just the mapping object
+    if (data && typeof data === 'object' && ('mapping' in data || 'likeTriggers' in data)) {
+      // New format: { mapping, likeTriggers }
+      setMapping({ ...(data.mapping || {}) });
+      const triggers = Array.isArray(data.likeTriggers) ? data.likeTriggers : [];
+      // Reset fired counts on load so triggers start fresh
+      setLikeTriggers(triggers.map(t => ({ ...t, firedCount: 0 })));
+    } else {
+      // Old format: data is the mapping object
+      setMapping({ ...data });
+      setLikeTriggers([]);
+    }
   }
 
   function deleteProfile(name) {
@@ -259,6 +272,13 @@ export default function App() {
       setProfileName('');
       localStorage.removeItem(LAST_PROFILE_KEY);
     }
+  }
+
+  function clearProfile() {
+    setProfileName('');
+    localStorage.removeItem(LAST_PROFILE_KEY);
+    setMapping({});
+    setLikeTriggers([]);
   }
 
   function deleteAllMappings() {
@@ -331,6 +351,9 @@ export default function App() {
       connectionError={connectionError}
       isLive={isLive}
       onConnectionChange={handleConnectionChange}
+      stackingEnabled={stackingEnabled}
+      onStackingModeChange={send}
+      targetWindowKeyword={targetWindowKeyword}
     >
       {/* Mapping Section - Left side (60% width on desktop) */}
       <CleanMappingSection
@@ -342,6 +365,7 @@ export default function App() {
         onSaveProfile={saveCurrentAsProfile}
         onLoadProfile={loadProfile}
         onDeleteProfile={deleteProfile}
+        onClearProfile={clearProfile}
         onTestGift={testGift}
         paused={paused}
         onTogglePause={togglePause}
