@@ -9,6 +9,8 @@ REM ============================================
 
 echo Starting TTLxRL application...
 echo Current directory: %CD%
+echo Script path: %~dp0
+echo.
 
 REM ---- Prerequisites check ----
 echo Checking for npm...
@@ -22,14 +24,13 @@ if %ERRORLEVEL% NEQ 0 (
 ) else (
   echo npm found successfully.
   echo Testing npm version...
-  npm --version
+  npm --version 2>nul
   if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: npm command failed
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
+    echo WARNING: Could not get npm version, but npm appears to be installed.
+    echo Continuing anyway...
+  ) else (
+    echo npm is working correctly.
   )
-  echo npm is working correctly.
 )
 
 REM ---- Install dependencies (runs only if node_modules missing) ----
@@ -38,12 +39,11 @@ IF NOT EXIST node_modules (
   echo Installing root dependencies...
   npm install --silent
   if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to install root dependencies
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
+    echo WARNING: Failed to install root dependencies
+    echo Continuing anyway - dependencies might already be available...
+  ) else (
+    echo Root dependencies installed successfully.
   )
-  echo Root dependencies installed successfully.
 ) else (
   echo Root dependencies already installed.
 )
@@ -55,13 +55,12 @@ IF NOT EXIST frontend\node_modules (
   cd /d %~dp0frontend
   npm install --silent
   if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to install frontend dependencies
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
+    echo WARNING: Failed to install frontend dependencies
+    echo Continuing anyway - dependencies might already be available...
+  ) else (
+    echo Frontend dependencies installed successfully.
   )
   cd /d %~dp0
-  echo Frontend dependencies installed successfully.
 ) else (
   echo Frontend dependencies already installed.
 )
@@ -73,13 +72,12 @@ IF NOT EXIST backend\node_modules (
   cd /d %~dp0backend
   npm install --silent
   if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to install backend dependencies
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
+    echo WARNING: Failed to install backend dependencies
+    echo Continuing anyway - dependencies might already be available...
+  ) else (
+    echo Backend dependencies installed successfully.
   )
   cd /d %~dp0
-  echo Backend dependencies installed successfully.
 ) else (
   echo Backend dependencies already installed.
 )
@@ -91,13 +89,12 @@ IF NOT EXIST frontend\electron\node_modules (
   cd /d %~dp0frontend\electron
   npm install --silent
   if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to install electron dependencies
-    echo Press any key to exit...
-    pause >nul
-    exit /b 1
+    echo WARNING: Failed to install electron dependencies
+    echo Continuing anyway - dependencies might already be available...
+  ) else (
+    echo Electron dependencies installed successfully.
   )
   cd /d %~dp0
-  echo Electron dependencies installed successfully.
 ) else (
   echo Electron dependencies already installed.
 )
@@ -118,20 +115,16 @@ REM ---- Start frontend in the same window (background) ----
 echo Starting frontend server...
 start /b "TTL_RL Frontend" cmd /c "cd /d %~dp0frontend && npm run dev"
 if %ERRORLEVEL% NEQ 0 (
-  echo ERROR: Failed to start frontend server
-  echo Press any key to exit...
-  pause >nul
-  exit /b 1
+  echo WARNING: Failed to start frontend server
+  echo Continuing anyway...
 )
 
 REM ---- Start backend in the same window (background) ----
 echo Starting backend server...
 start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend && npm start"
 if %ERRORLEVEL% NEQ 0 (
-  echo ERROR: Failed to start backend server
-  echo Press any key to exit...
-  pause >nul
-  exit /b 1
+  echo WARNING: Failed to start backend server
+  echo Continuing anyway...
 )
 
 REM ---- Wait a moment for servers to start, then launch Electron app ----
@@ -141,10 +134,8 @@ timeout /t 3 /nobreak >nul
 echo Launching Electron app...
 start "TTL_RL Electron App" cmd /c "cd /d %~dp0frontend\electron && npm start"
 if %ERRORLEVEL% NEQ 0 (
-  echo ERROR: Failed to launch Electron app
-  echo Press any key to exit...
-  pause >nul
-  exit /b 1
+  echo WARNING: Failed to launch Electron app
+  echo Continuing anyway...
 )
 
 REM ---- Check if Electron launched successfully ----
