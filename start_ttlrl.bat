@@ -39,8 +39,7 @@ start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend & npm start"
 
 REM ---- Wait a moment for servers to start, then launch Electron app ----
 timeout /t 3 /nobreak >nul
-cd /d %~dp0frontend\electron
-start "TTL_RL Electron App" cmd /c "npm start"
+start "TTL_RL Electron App" cmd /c "cd /d %~dp0frontend\electron & npm start"
 
 echo.
 echo ============================================
