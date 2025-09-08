@@ -19,8 +19,18 @@ if %ERRORLEVEL% NEQ 0 (
   echo Press any key to exit...
   pause >nul
   exit /b 1
+) else (
+  echo npm found successfully.
+  echo Testing npm version...
+  npm --version
+  if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: npm command failed
+    echo Press any key to exit...
+    pause >nul
+    exit /b 1
+  )
+  echo npm is working correctly.
 )
-echo npm found successfully.
 
 REM ---- Install dependencies (runs only if node_modules missing) ----
 echo Checking root dependencies...
@@ -151,12 +161,13 @@ if %ERRORLEVEL% EQU 0 (
 
 echo.
 echo ============================================
-echo  Both servers starting...                  
+echo  APPLICATION STATUS                          
 echo  FRONTEND : http://localhost:5173           
 echo  BACKEND  : ws://localhost:5178            
 echo  Electron app should be launching...
 echo  Close this window to stop all services.               
 echo ============================================
 echo.
+echo Script completed successfully!
 echo Press any key to close this window and stop all services...
 pause >nul
