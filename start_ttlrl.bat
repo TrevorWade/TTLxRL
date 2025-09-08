@@ -12,15 +12,23 @@ echo Current directory: %CD%
 echo Script path: %~dp0
 echo.
 
+REM Add error handling to prevent script from closing unexpectedly
+set "ERROR_COUNT=0"
+
+REM Test basic functionality
+echo Testing basic script functionality...
+echo This is a test message to verify the script is running.
+echo.
+
 REM ---- Prerequisites check ----
 echo Checking for npm...
 where npm >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
   echo ERROR: "npm" was not found in PATH. Please install Node.js 18+ and try again.
   echo.
-  echo Press any key to exit...
+  set /a ERROR_COUNT+=1
+  echo Press any key to continue anyway...
   pause >nul
-  exit /b 1
 ) else (
   echo npm found successfully.
   echo Testing npm version...
@@ -41,6 +49,7 @@ IF NOT EXIST node_modules (
   if %ERRORLEVEL% NEQ 0 (
     echo WARNING: Failed to install root dependencies
     echo Continuing anyway - dependencies might already be available...
+    set /a ERROR_COUNT+=1
   ) else (
     echo Root dependencies installed successfully.
   )
@@ -57,6 +66,7 @@ IF NOT EXIST frontend\node_modules (
   if %ERRORLEVEL% NEQ 0 (
     echo WARNING: Failed to install frontend dependencies
     echo Continuing anyway - dependencies might already be available...
+    set /a ERROR_COUNT+=1
   ) else (
     echo Frontend dependencies installed successfully.
   )
@@ -74,6 +84,7 @@ IF NOT EXIST backend\node_modules (
   if %ERRORLEVEL% NEQ 0 (
     echo WARNING: Failed to install backend dependencies
     echo Continuing anyway - dependencies might already be available...
+    set /a ERROR_COUNT+=1
   ) else (
     echo Backend dependencies installed successfully.
   )
@@ -91,6 +102,7 @@ IF NOT EXIST frontend\electron\node_modules (
   if %ERRORLEVEL% NEQ 0 (
     echo WARNING: Failed to install electron dependencies
     echo Continuing anyway - dependencies might already be available...
+    set /a ERROR_COUNT+=1
   ) else (
     echo Electron dependencies installed successfully.
   )
@@ -100,6 +112,7 @@ IF NOT EXIST frontend\electron\node_modules (
 )
 
 REM ---- Create backend\.env with sensible defaults if missing ----
+echo Checking for backend\.env file...
 IF NOT EXIST backend\.env (
   echo Creating backend\.env with default values. You can edit it later.
   (
@@ -109,6 +122,14 @@ IF NOT EXIST backend\.env (
     echo INJECTION_MODE=autohotkey
     echo AHK_PATH="C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
   ) > backend\.env
+  if %ERRORLEVEL% NEQ 0 (
+    echo WARNING: Failed to create backend\.env file
+    set /a ERROR_COUNT+=1
+  ) else (
+    echo backend\.env created successfully.
+  )
+) else (
+  echo backend\.env already exists.
 )
 
 REM ---- Start frontend in the same window (background) ----
@@ -117,6 +138,7 @@ start /b "TTL_RL Frontend" cmd /c "cd /d %~dp0frontend && npm run dev"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start frontend server
   echo Continuing anyway...
+  set /a ERROR_COUNT+=1
 )
 
 REM ---- Start backend in the same window (background) ----
@@ -125,6 +147,7 @@ start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend && npm start"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start backend server
   echo Continuing anyway...
+  set /a ERROR_COUNT+=1
 )
 
 REM ---- Wait a moment for servers to start, then launch Electron app ----
@@ -136,6 +159,7 @@ start "TTL_RL Electron App" cmd /c "cd /d %~dp0frontend\electron && npm start"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to launch Electron app
   echo Continuing anyway...
+  set /a ERROR_COUNT+=1
 )
 
 REM ---- Check if Electron launched successfully ----
@@ -159,6 +183,12 @@ echo  Electron app should be launching...
 echo  Close this window to stop all services.               
 echo ============================================
 echo.
-echo Script completed successfully!
+if %ERROR_COUNT% GTR 0 (
+  echo Script completed with %ERROR_COUNT% warnings/errors.
+  echo Check the messages above for details.
+) else (
+  echo Script completed successfully!
+)
+echo.
 echo Press any key to close this window and stop all services...
 pause >nul
