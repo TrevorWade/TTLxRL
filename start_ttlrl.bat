@@ -19,6 +19,30 @@ IF NOT EXIST node_modules (
   npm install --silent
 )
 
+REM ---- Install frontend dependencies ----
+IF NOT EXIST frontend\node_modules (
+  echo Installing frontend dependencies...
+  cd /d %~dp0frontend
+  npm install --silent
+  cd /d %~dp0
+)
+
+REM ---- Install backend dependencies ----
+IF NOT EXIST backend\node_modules (
+  echo Installing backend dependencies...
+  cd /d %~dp0backend
+  npm install --silent
+  cd /d %~dp0
+)
+
+REM ---- Install electron dependencies ----
+IF NOT EXIST frontend\electron\node_modules (
+  echo Installing electron dependencies...
+  cd /d %~dp0frontend\electron
+  npm install --silent
+  cd /d %~dp0
+)
+
 REM ---- Create backend\.env with sensible defaults if missing ----
 IF NOT EXIST backend\.env (
   echo Creating backend\.env with default values. You can edit it later.
@@ -32,14 +56,14 @@ IF NOT EXIST backend\.env (
 )
 
 REM ---- Start frontend in the same window (background) ----
-start /b "TTL_RL Frontend" cmd /c "cd /d %~dp0frontend & npm run dev"
+start /b "TTL_RL Frontend" cmd /c "cd /d %~dp0frontend && npm run dev"
 
 REM ---- Start backend in the same window (background) ----
-start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend & npm start"
+start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend && npm start"
 
 REM ---- Wait a moment for servers to start, then launch Electron app ----
 timeout /t 3 /nobreak >nul
-start "TTL_RL Electron App" cmd /c "cd /d %~dp0frontend\electron & npm start"
+start "TTL_RL Electron App" cmd /c "cd /d %~dp0frontend\electron && npm start"
 
 echo.
 echo ============================================
