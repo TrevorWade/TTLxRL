@@ -62,15 +62,30 @@ REM ---- Start backend in the same window (background) ----
 start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend && npm start"
 
 REM ---- Wait a moment for servers to start, then launch Electron app ----
+echo Waiting for servers to start...
 timeout /t 3 /nobreak >nul
+
+echo Launching Electron app...
 start "TTL_RL Electron App" cmd /c "cd /d %~dp0frontend\electron && npm start"
+
+REM ---- Check if Electron launched successfully ----
+timeout /t 2 /nobreak >nul
+tasklist /FI "WINDOWTITLE eq TTL_RL Electron App*" 2>nul | find /I "electron.exe" >nul
+if %ERRORLEVEL% EQU 0 (
+    echo Electron app launched successfully!
+) else (
+    echo Warning: Electron app may not have launched properly.
+    echo Check the Electron window for any error messages.
+)
 
 echo.
 echo ============================================
 echo  Both servers starting...                  
 echo  FRONTEND : http://localhost:5173           
 echo  BACKEND  : ws://localhost:5178            
-echo  Close this window to stop them.               
+echo  Electron app should be launching...
+echo  Close this window to stop all services.               
 echo ============================================
 echo.
-pause
+echo Press any key to close this window and stop all services...
+pause >nul
