@@ -4,6 +4,8 @@ import { useState } from 'react';
  * GlobalControlBar contains pause/resume and profile controls that persist across tabs
  * Features: Always visible controls, compact design, profile management
  */
+import { useOverlay } from '../context/OverlayContext.jsx';
+
 export default function GlobalControlBar({
   paused,
   onTogglePause,
@@ -16,6 +18,7 @@ export default function GlobalControlBar({
   onClearProfile
 }) {
   const [showProfiles, setShowProfiles] = useState(false);
+  const { toggleOverlay } = useOverlay();
 
   return (
     <div className="flex-shrink-0 bg-tiktok-gray/30 border-b border-gray-600 px-6 py-3">
@@ -44,6 +47,29 @@ export default function GlobalControlBar({
 
         {/* Right Side - Profile Controls */}
         <div className="flex items-center gap-2">
+          {/* Stream Overlay Toggle Button (left of Clear) */}
+          <button
+            onClick={async () => {
+              try {
+                const bridge = (typeof window !== 'undefined' && window.photoMap) ? window.photoMap : null;
+                if (bridge && bridge.openOverlayWindow) {
+                  await bridge.openOverlayWindow();
+                } else {
+                  // Fallback to in-app overlay toggle if Electron bridge missing
+                  toggleOverlay();
+                }
+              } catch {
+                toggleOverlay();
+              }
+            }}
+            className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors flex items-center gap-2"
+            title="Stream Overlay"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v12a1 1 0 01-1 1H9l-4 4v-4H4a1 1 0 01-1-1V4z" />
+            </svg>
+            <span className="hidden sm:inline">Overlay</span>
+          </button>
           {/* Clear Profile Button */}
           <button
             onClick={onClearProfile}

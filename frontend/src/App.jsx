@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useOverlay } from './context/OverlayContext.jsx';
+import StreamOverlay from './components/StreamOverlay.jsx';
 import { connect, send } from './ws';
 import MainLayout from './components/MainLayout';
 import { CleanMappingSection } from './components/MappingSection';
@@ -6,12 +8,19 @@ import LiveFeedSection from './components/LiveFeedSection';
 import TikTokConnection from './components/TikTokConnection';
 
 export default function App() {
+  const { isOverlayOpen } = useOverlay();
   // mapping: { giftNameLower: { key, durationMs } }
   const [mapping, setMapping] = useState({});
+  const mappingRef = useRef({});
+  useEffect(() => { mappingRef.current = mapping; }, [mapping]);
   const [paused, setPaused] = useState(false);
   // Like count tracking
   const [totalLikes, setTotalLikes] = useState(0);
+  const totalLikesRef = useRef(0);
+  useEffect(() => { totalLikesRef.current = totalLikes; }, [totalLikes]);
   const [likeTriggers, setLikeTriggers] = useState([]);
+  const likeTriggersRef = useRef([]);
+  useEffect(() => { likeTriggersRef.current = likeTriggers; }, [likeTriggers]);
   // Aggregated feed: map + order per plan
   const [feedMap, setFeedMap] = useState({}); // key -> item
   const [feedOrder, setFeedOrder] = useState([]); // array of keys, newest first
@@ -44,9 +53,32 @@ export default function App() {
   });
   const [profileName, setProfileName] = useState('');
 
+  // BroadcastChannel for overlay window (persist across renders)
+  const overlayBcRef = useRef(null);
+  useEffect(() => {
+    try {
+      const bc = new BroadcastChannel('ttlrl-overlay');
+      overlayBcRef.current = bc;
+      bc.onmessage = (ev) => {
+        const msg = ev.data || {};
+        if (msg && msg.type === 'request-state') {
+          try {
+            bc.postMessage({ type: 'mapping', mapping: mappingRef.current });
+            bc.postMessage({ type: 'likeTriggers', likeTriggers: likeTriggersRef.current });
+            bc.postMessage({ type: 'totalLikes', totalLikes: totalLikesRef.current });
+          } catch {}
+        }
+      };
+      return () => { try { bc.close(); } catch {} };
+    } catch {}
+  }, []);
+
   // Keep backend in sync whenever mapping changes
   useEffect(() => {
     send({ type: 'update-mapping', mapping });
+    try {
+      (overlayBcRef.current || new BroadcastChannel('ttlrl-overlay')).postMessage({ type: 'mapping', mapping });
+    } catch {}
   }, [mapping]);
 
   useEffect(() => {
@@ -200,6 +232,18 @@ export default function App() {
     });
   }, []);
 
+  // Broadcast like triggers and likes to overlay window
+  useEffect(() => {
+    try {
+      (overlayBcRef.current || new BroadcastChannel('ttlrl-overlay')).postMessage({ type: 'likeTriggers', likeTriggers });
+    } catch {}
+  }, [likeTriggers]);
+  useEffect(() => {
+    try {
+      (overlayBcRef.current || new BroadcastChannel('ttlrl-overlay')).postMessage({ type: 'totalLikes', totalLikes });
+    } catch {}
+  }, [totalLikes]);
+
   // LikeTriggerEngine - monitors totalLikes and fires triggers
   useEffect(() => {
     console.log(`🔍 Like trigger engine running - totalLikes: ${totalLikes}, triggers: ${likeTriggers.length}`);
@@ -345,6 +389,7 @@ export default function App() {
   }
 
   return (
+    <>
     <MainLayout
       connectionStatus={connectionStatus}
       connectedUsername={connectedUsername}
@@ -387,6 +432,10 @@ export default function App() {
         isLive={isLive}
       />
     </MainLayout>
+    {isOverlayOpen && (
+      <StreamOverlay mapping={mapping} likeTriggers={likeTriggers} />
+    )}
+    </>
   );
 }
 

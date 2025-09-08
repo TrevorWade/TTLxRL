@@ -1,5 +1,9 @@
-// Loads environment variables from .env
-require('dotenv').config();
+// Loads environment variables from .env (optional)
+try {
+  require('dotenv').config();
+} catch (e) {
+  console.warn('dotenv not found; continuing without .env file');
+}
 
 const { WebSocketServer } = require('ws');
 const { WebcastPushConnection } = require('tiktok-live-connector');

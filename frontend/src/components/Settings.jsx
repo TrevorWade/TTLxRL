@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import PhotoMappingSettings from './PhotoMappingSettings.jsx';
 
 /**
  * Settings component for configuring gift stacking behavior
@@ -157,6 +158,9 @@ export default function Settings({
               ))}
             </div>
           </div>
+
+          {/* Photo Mapping Section */}
+          <PhotoMappingSettings />
 
           {/* Help Section */}
           <div className="p-4 bg-blue-900/20 border border-blue-700/50 rounded-lg">

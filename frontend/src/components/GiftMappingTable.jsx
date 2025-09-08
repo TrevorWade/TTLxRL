@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 
 /**
  * GiftMappingTable provides a clean, searchable data grid for gift mappings
@@ -13,6 +13,15 @@ export default function GiftMappingTable({
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMappings, setSelectedMappings] = useState(new Set());
+
+  // Broadcast mapping changes so the detached overlay window receives updates immediately
+  useEffect(() => {
+    try {
+      const bc = new BroadcastChannel('ttlrl-overlay');
+      bc.postMessage({ type: 'mapping', mapping });
+      bc.close();
+    } catch {}
+  }, [mapping]);
 
   // Filter mappings based on search term
   const filteredMappings = useMemo(() => {

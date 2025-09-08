@@ -37,9 +37,10 @@ start /b "TTL_RL Frontend" cmd /c "cd /d %~dp0frontend & npm run dev"
 REM ---- Start backend in the same window (background) ----
 start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend & npm start"
 
-REM ---- Wait a moment for servers to start, then open browser ----
+REM ---- Wait a moment for servers to start, then launch Electron app ----
 timeout /t 3 /nobreak >nul
-start http://localhost:5173
+cd /d %~dp0frontend\electron
+start "TTL_RL Electron App" cmd /c "npm start"
 
 echo.
 echo ============================================
