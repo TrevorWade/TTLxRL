@@ -1,0 +1,49 @@
+You are to modify the existing Node.js TikTok Live Connector app so that it serves a dynamic public webpage showing all available TikTok gifts and the in-game actions they trigger.
+
+Requirements:
+1. Data Structure
+   - Maintain a `gifts.json` file in the root directory containing an array of objects:
+     [
+       {
+         "name": "Rose",
+         "image": "<TikTok gift image URL>",
+         "action": "Spawn 1 small enemy"
+       },
+       {
+         "name": "Fireworks",
+         "image": "<TikTok gift image URL>",
+         "action": "Explode entire map"
+       }
+     ]
+   - If a new gift is detected from TikTok Live that is not in `gifts.json`, append it with a placeholder action `"No action assigned yet"`.
+
+2. Server
+   - Use Express.js to serve a public `/gifts` route.
+   - This page must render:
+     - Gift image
+     - Gift name
+     - In-game action description
+   - Style the page in a clean, dark theme with responsive layout.
+   - Use HTML + inline CSS for simplicity.
+
+3. Live Updates
+   - On gift detection from TikTok Live Connector, if the gift is new:
+       - Append it to `gifts.json` (with placeholder action).
+       - Ensure the `/gifts` page instantly reflects changes without restarting the server.
+   - Read `gifts.json` fresh every time `/gifts` is requested.
+
+4. Security
+   - Do not expose any private API keys.
+   - This `/gifts` route should be readable by anyone (no login required).
+
+5. Code Integration
+   - Hook into the `tiktokLive.on('gift')` event.
+   - If gift is in `gifts.json`, do nothing.
+   - If not found, push new gift object to `gifts.json`.
+
+6. Output
+   - Provide complete working code for:
+     - Reading/writing `gifts.json`
+     - Express server with `/gifts` route
+     - Integration with TikTok Live Connector’s gift event
+     - Example `gifts.json` with at least two entries

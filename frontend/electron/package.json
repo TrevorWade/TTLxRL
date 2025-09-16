@@ -12,10 +12,10 @@
     "dist": "npm run build"
   },
   "dependencies": {
-    "electron": "^37.3.1",
     "electron-updater": "^6.6.2"
   },
   "devDependencies": {
+    "electron": "^37.3.1",
     "electron-builder": "^26.0.12"
   },
   "build": {
@@ -25,8 +25,20 @@
       "output": "dist-electron"
     },
     "files": [
-      "dist/**/*",
-      "electron/**/*"
+      "main.js",
+      "preload.js",
+      "assets/**/*",
+      "../dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!node_modules/.cache/**"
+        ]
+      }
     ],
     "win": {
       "target": "nsis",
@@ -36,7 +48,16 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    }
+      "createStartMenuShortcut": true,
+      "perMachine": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "TrevorWade",
+        "repo": "TTLxRL"
+      }
+    ],
+    "artifactName": "TTLxRL-${version}-Setup.${ext}"
   }
 }

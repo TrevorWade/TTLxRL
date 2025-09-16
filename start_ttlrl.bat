@@ -1,5 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
+REM Ensure a persistent console window (prevents quick-close on double-click)
+if "%PERSISTENT_SHELL%"=="1" goto :persisted_console
+start "TTL_RL Launcher" cmd /k "set PERSISTENT_SHELL=1 & call ""%~f0"""
+exit /b
+
+:persisted_console
+if "%DEBUG%"=="1" pause
 REM ============================================
 REM  TikTok Live → Key Mapper starter script
 REM  Opens two terminal windows:
@@ -14,11 +21,26 @@ echo.
 
 REM Add error handling to prevent script from closing unexpectedly
 set "ERROR_COUNT=0"
+set "FIRST_RUN=0"
 
 REM Test basic functionality
 echo Testing basic script functionality...
 echo This is a test message to verify the script is running.
 echo.
+
+REM ---- Detect first run (any missing dependencies or config) ----
+IF NOT EXIST node_modules set "FIRST_RUN=1"
+IF NOT EXIST frontend\node_modules set "FIRST_RUN=1"
+IF NOT EXIST backend\node_modules set "FIRST_RUN=1"
+IF NOT EXIST frontend\electron\node_modules set "FIRST_RUN=1"
+IF NOT EXIST backend\.env set "FIRST_RUN=1"
+if "%FIRST_RUN%"=="1" (
+  echo First-time setup detected. Installing any missing dependencies...
+  echo.
+) else (
+  echo Dependencies appear installed. Skipping install steps quickly.
+  echo.
+)
 
 REM ---- Prerequisites check ----
 echo Checking for npm...
@@ -61,7 +83,7 @@ REM ---- Install frontend dependencies ----
 echo Checking frontend dependencies...
 IF NOT EXIST frontend\node_modules (
   echo Installing frontend dependencies...
-  cd /d %~dp0frontend
+  cd /d "%~dp0frontend"
   npm install --silent
   if %ERRORLEVEL% NEQ 0 (
     echo WARNING: Failed to install frontend dependencies
@@ -70,7 +92,7 @@ IF NOT EXIST frontend\node_modules (
   ) else (
     echo Frontend dependencies installed successfully.
   )
-  cd /d %~dp0
+  cd /d "%~dp0"
 ) else (
   echo Frontend dependencies already installed.
 )
@@ -79,7 +101,7 @@ REM ---- Install backend dependencies ----
 echo Checking backend dependencies...
 IF NOT EXIST backend\node_modules (
   echo Installing backend dependencies...
-  cd /d %~dp0backend
+  cd /d "%~dp0backend"
   npm install --silent
   if %ERRORLEVEL% NEQ 0 (
     echo WARNING: Failed to install backend dependencies
@@ -88,7 +110,7 @@ IF NOT EXIST backend\node_modules (
   ) else (
     echo Backend dependencies installed successfully.
   )
-  cd /d %~dp0
+  cd /d "%~dp0"
 ) else (
   echo Backend dependencies already installed.
 )
@@ -97,7 +119,7 @@ REM ---- Install electron dependencies ----
 echo Checking electron dependencies...
 IF NOT EXIST frontend\electron\node_modules (
   echo Installing electron dependencies...
-  cd /d %~dp0frontend\electron
+  cd /d "%~dp0frontend\electron"
   npm install --silent
   if %ERRORLEVEL% NEQ 0 (
     echo WARNING: Failed to install electron dependencies
@@ -106,7 +128,7 @@ IF NOT EXIST frontend\electron\node_modules (
   ) else (
     echo Electron dependencies installed successfully.
   )
-  cd /d %~dp0
+  cd /d "%~dp0"
 ) else (
   echo Electron dependencies already installed.
 )
@@ -134,7 +156,7 @@ IF NOT EXIST backend\.env (
 
 REM ---- Start frontend in the same window (background) ----
 echo Starting frontend server...
-start /b "TTL_RL Frontend" cmd /c "cd /d %~dp0frontend && npm run dev"
+start /b "TTL_RL Frontend" cmd /c "pushd \"%~dp0frontend\" & npm run dev"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start frontend server
   echo Continuing anyway...
@@ -143,19 +165,23 @@ if %ERRORLEVEL% NEQ 0 (
 
 REM ---- Start backend in the same window (background) ----
 echo Starting backend server...
-start /b "TTL_RL Backend" cmd /c "cd /d %~dp0backend && npm start"
+start /b "TTL_RL Backend" cmd /c "pushd \"%~dp0backend\" & npm start"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start backend server
   echo Continuing anyway...
   set /a ERROR_COUNT+=1
 )
 
-REM ---- Wait a moment for servers to start, then launch Electron app ----
+REM ---- Wait for servers to start listening, then launch Electron app ----
 echo Waiting for servers to start...
-timeout /t 3 /nobreak >nul
+echo - Waiting for frontend (port 5173) to listen...
+call :wait_for_port 5173 20
+echo - Waiting for backend (port 5178) to listen...
+call :wait_for_port 5178 20
+if "%FIRST_RUN%"=="1" echo One-time setup completed. Launching the app...
 
 echo Launching Electron app...
-start "TTL_RL Electron App" cmd /c "cd /d %~dp0frontend\electron && npm start"
+start "TTL_RL Electron App" cmd /c "pushd \"%~dp0frontend\electron\" & npm start"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to launch Electron app
   echo Continuing anyway...
@@ -192,3 +218,28 @@ if %ERROR_COUNT% GTR 0 (
 echo.
 echo Press any key to close this window and stop all services...
 pause >nul
+
+goto :eof
+
+REM ---- Helpers ----
+:wait_for_port
+REM Wait for a TCP port to be in LISTENING state
+REM Usage: call :wait_for_port PORT MAX_WAIT_SECONDS
+setlocal
+set "TARGET_PORT=%~1"
+set "MAX_SECS=%~2"
+if "%MAX_SECS%"=="" set "MAX_SECS=15"
+set /a "ELAPSED=0"
+:_wait_loop
+rem We search for a line that includes :PORT and LISTENING
+netstat -ano | findstr /R /C:":%TARGET_PORT% .*LISTENING" >nul
+if %ERRORLEVEL% EQU 0 (
+  endlocal & goto :eof
+)
+timeout /t 1 /nobreak >nul
+set /a ELAPSED+=1
+if %ELAPSED% GEQ %MAX_SECS% (
+  echo WARNING: Port %TARGET_PORT% did not start listening within %MAX_SECS% seconds.
+  endlocal & goto :eof
+)
+goto :_wait_loop

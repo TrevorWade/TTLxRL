@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, dialog, ipcMain, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -47,19 +47,28 @@ function createWindow() {
   // Load your app based on environment
   // In development, always load from Vite dev server
   // In production, load from built files
-  if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
-    // Development: load from Vite dev server
-    mainWindow.loadURL('http://localhost:5173');
-    // Keep DevTools closed by default. To auto-open, set env var before launch:
-    // ELECTRON_OPEN_DEVTOOLS=1
+  const devServerUrl = 'http://localhost:5173';
+  const loadProduction = () => {
+    const indexPath = path.join(__dirname, '../dist/index.html');
+    console.log('Loading from:', indexPath);
+    mainWindow.loadFile(indexPath);
+  };
+
+  if (!app.isPackaged) {
+    // Try dev server first; if it fails, fall back to built files
+    mainWindow.webContents.once('did-fail-load', () => {
+      console.warn('Dev server not available. Falling back to built files.');
+      loadProduction();
+    });
+    mainWindow.loadURL(devServerUrl).catch(() => {
+      // Safety: in case promise rejects before did-fail-load fires
+      loadProduction();
+    });
     if (process.env.ELECTRON_OPEN_DEVTOOLS === '1') {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
   } else {
-    // Production: load from built files
-    const indexPath = path.join(__dirname, '../dist/index.html');
-    console.log('Loading from:', indexPath);
-    mainWindow.loadFile(indexPath);
+    loadProduction();
   }
 
   // Show window when ready to prevent visual flash
@@ -88,12 +97,17 @@ app.whenReady().then(() => {
   // Register photo mapping IPC handlers
   registerPhotoMapIpc();
   try {
-    autoUpdater.autoDownload = true;
-    autoUpdater.checkForUpdatesAndNotify();
+    autoUpdater.autoDownload = false; // manual download via menu
 
     autoUpdater.on('update-available', () => {
-      if (mainWindow) {
-        mainWindow.webContents.send('update-available');
+      const response = dialog.showMessageBoxSync({
+        type: 'info',
+        buttons: ['Download', 'Cancel'],
+        title: 'Update available',
+        message: 'A new version is available. Download now?'
+      });
+      if (response === 0) {
+        autoUpdater.downloadUpdate();
       }
     });
 
@@ -113,6 +127,51 @@ app.whenReady().then(() => {
   } catch (e) {
     console.error('Auto-update initialization failed:', e);
   }
+
+  // Application menu with Check for Updates
+  const template = [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Check for Updates',
+          click: async () => {
+            try {
+              const result = await autoUpdater.checkForUpdates();
+              if (!result || !result.updateInfo || result.updateInfo.version === app.getVersion()) {
+                dialog.showMessageBox({
+                  type: 'info',
+                  message: 'You are on the latest version.'
+                });
+              }
+            } catch (err) {
+              dialog.showMessageBox({
+                type: 'error',
+                message: 'Failed to check for updates. Please try again later.'
+              });
+            }
+          }
+        },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    }
+  ];
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
 });
 
 // Quit when all windows are closed
@@ -279,6 +338,8 @@ function createOverlayWindow() {
     height: 600,
     frame: true,
     transparent: true,
+    show: false,
+    backgroundColor: '#00000000',
     alwaysOnTop: true,
     fullscreenable: false,
     resizable: true,
@@ -292,6 +353,11 @@ function createOverlayWindow() {
     }
   });
 
+  // Only show once content is ready to avoid white flash
+  const reveal = () => { try { if (!overlayWindow.isDestroyed()) overlayWindow.show(); } catch {} };
+  overlayWindow.once('ready-to-show', reveal);
+  overlayWindow.webContents.once('did-finish-load', reveal);
+
   // Make overlay yield to other windows when it loses focus
   overlayWindow.on('blur', () => {
     try { overlayWindow.setAlwaysOnTop(false); } catch {}
@@ -300,11 +366,24 @@ function createOverlayWindow() {
     try { overlayWindow.setAlwaysOnTop(true); } catch {}
   });
 
-  if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
-    overlayWindow.loadURL('http://localhost:5173#overlay');
-  } else {
+  // In dev, try Vite server first and gracefully fall back to built files
+  const loadOverlayProduction = () => {
     const indexPath = path.join(__dirname, '../dist/index.html');
     overlayWindow.loadFile(indexPath, { hash: 'overlay' });
+  };
+
+  if (!app.isPackaged) {
+    const devServerUrl = 'http://localhost:5173#overlay';
+    overlayWindow.webContents.once('did-fail-load', () => {
+      try { console.warn('Overlay dev server not available. Falling back to built files.'); } catch {}
+      loadOverlayProduction();
+    });
+    overlayWindow.loadURL(devServerUrl).catch(() => {
+      // Safety: in case the promise rejects before did-fail-load fires
+      loadOverlayProduction();
+    });
+  } else {
+    loadOverlayProduction();
   }
 
   overlayWindow.on('closed', () => {
