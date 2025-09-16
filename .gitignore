@@ -19,3 +19,21 @@ frontend/electron/build/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local planning docs
+gift_mapper
+gift_browse_button_plan.md
+gift_menu_improvement_implementation_summary.md
+gift_menu_improvement_plan.md
+gift_real_icons_migration_plan.md
+gift_stacking_plan.md
+installer_plan.md
+like_count_plan.md
+live_feed_aggregation_plan.md
+macro_sequence_plan.md
+site_design.md
+start_ttlrl_fix_plan.md
+stream_overlay_and_photo_mapping_plan.md
+tiktok_macro_project_plan.md
+windows_build_steps.md
+plugin/Plugin-Overview-Plan.md
