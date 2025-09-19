@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 REM Ensure a persistent console window (prevents quick-close on double-click)
 if "%PERSISTENT_SHELL%"=="1" goto :persisted_console
-start "TTL_RL Launcher" cmd /k "set PERSISTENT_SHELL=1 & call ""%~f0"""
+start "TTL_RL Launcher" cmd /k "set PERSISTENT_SHELL=1 ^& call \"%~f0\""
 exit /b
 
 :persisted_console
@@ -28,135 +28,21 @@ echo Testing basic script functionality...
 echo This is a test message to verify the script is running.
 echo.
 
-REM ---- Detect first run (any missing dependencies or config) ----
-IF NOT EXIST node_modules set "FIRST_RUN=1"
-IF NOT EXIST frontend\node_modules set "FIRST_RUN=1"
-IF NOT EXIST backend\node_modules set "FIRST_RUN=1"
-IF NOT EXIST frontend\electron\node_modules set "FIRST_RUN=1"
-IF NOT EXIST backend\.env set "FIRST_RUN=1"
-if "%FIRST_RUN%"=="1" (
-  echo First-time setup detected. Installing any missing dependencies...
-  echo.
-) else (
-  echo Dependencies appear installed. Skipping install steps quickly.
-  echo.
-)
-
-REM ---- Prerequisites check ----
-echo Checking for npm...
-where npm >nul 2>nul
-if %ERRORLEVEL% NEQ 0 (
-  echo ERROR: "npm" was not found in PATH. Please install Node.js 18+ and try again.
-  echo.
-  set /a ERROR_COUNT+=1
-  echo Press any key to continue anyway...
-  pause >nul
-) else (
-  echo npm found successfully.
-  echo Testing npm version...
-  npm --version 2>nul
-  if %ERRORLEVEL% NEQ 0 (
-    echo WARNING: Could not get npm version, but npm appears to be installed.
-    echo Continuing anyway...
-  ) else (
-    echo npm is working correctly.
-  )
-)
-
-REM ---- Install dependencies (runs only if node_modules missing) ----
-echo Checking root dependencies...
-IF NOT EXIST node_modules (
-  echo Installing root dependencies...
-  npm install --silent
-  if %ERRORLEVEL% NEQ 0 (
-    echo WARNING: Failed to install root dependencies
-    echo Continuing anyway - dependencies might already be available...
-    set /a ERROR_COUNT+=1
-  ) else (
-    echo Root dependencies installed successfully.
-  )
-) else (
-  echo Root dependencies already installed.
-)
-
-REM ---- Install frontend dependencies ----
-echo Checking frontend dependencies...
-IF NOT EXIST frontend\node_modules (
-  echo Installing frontend dependencies...
-  cd /d "%~dp0frontend"
-  npm install --silent
-  if %ERRORLEVEL% NEQ 0 (
-    echo WARNING: Failed to install frontend dependencies
-    echo Continuing anyway - dependencies might already be available...
-    set /a ERROR_COUNT+=1
-  ) else (
-    echo Frontend dependencies installed successfully.
-  )
-  cd /d "%~dp0"
-) else (
-  echo Frontend dependencies already installed.
-)
-
-REM ---- Install backend dependencies ----
-echo Checking backend dependencies...
-IF NOT EXIST backend\node_modules (
-  echo Installing backend dependencies...
-  cd /d "%~dp0backend"
-  npm install --silent
-  if %ERRORLEVEL% NEQ 0 (
-    echo WARNING: Failed to install backend dependencies
-    echo Continuing anyway - dependencies might already be available...
-    set /a ERROR_COUNT+=1
-  ) else (
-    echo Backend dependencies installed successfully.
-  )
-  cd /d "%~dp0"
-) else (
-  echo Backend dependencies already installed.
-)
-
-REM ---- Install electron dependencies ----
-echo Checking electron dependencies...
-IF NOT EXIST frontend\electron\node_modules (
-  echo Installing electron dependencies...
-  cd /d "%~dp0frontend\electron"
-  npm install --silent
-  if %ERRORLEVEL% NEQ 0 (
-    echo WARNING: Failed to install electron dependencies
-    echo Continuing anyway - dependencies might already be available...
-    set /a ERROR_COUNT+=1
-  ) else (
-    echo Electron dependencies installed successfully.
-  )
-  cd /d "%~dp0"
-) else (
-  echo Electron dependencies already installed.
-)
-
-REM ---- Create backend\.env with sensible defaults if missing ----
-echo Checking for backend\.env file...
+REM ---- Quick dependency presence check ----
+IF NOT EXIST node_modules goto :missing_deps
+IF NOT EXIST frontend\node_modules goto :missing_deps
+IF NOT EXIST backend\node_modules goto :missing_deps
+IF NOT EXIST frontend\electron\node_modules goto :missing_deps
 IF NOT EXIST backend\.env (
-  echo Creating backend\.env with default values. You can edit it later.
-  (
-    echo TIKTOK_USERNAME=
-    echo WS_PORT=5178
-    echo TARGET_WINDOW_KEYWORD=rocket league
-    echo INJECTION_MODE=autohotkey
-    echo AHK_PATH="C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
-  ) > backend\.env
-  if %ERRORLEVEL% NEQ 0 (
-    echo WARNING: Failed to create backend\.env file
-    set /a ERROR_COUNT+=1
-  ) else (
-    echo backend\.env created successfully.
-  )
-) else (
-  echo backend\.env already exists.
+  echo WARNING: backend\.env is missing. Please run run_first.bat.
+  goto :missing_deps
 )
+echo Dependencies detected. Starting services...
+echo.
 
 REM ---- Start frontend in the same window (background) ----
 echo Starting frontend server...
-start /b "TTL_RL Frontend" cmd /c "pushd \"%~dp0frontend\" & npm run dev"
+start /b "TTL_RL Frontend" cmd /c "pushd \"%~dp0frontend\" ^& npm run dev"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start frontend server
   echo Continuing anyway...
@@ -165,7 +51,7 @@ if %ERRORLEVEL% NEQ 0 (
 
 REM ---- Start backend in the same window (background) ----
 echo Starting backend server...
-start /b "TTL_RL Backend" cmd /c "pushd \"%~dp0backend\" & npm start"
+start /b "TTL_RL Backend" cmd /c "pushd \"%~dp0backend\" ^& npm start"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start backend server
   echo Continuing anyway...
@@ -181,7 +67,7 @@ call :wait_for_port 5178 20
 if "%FIRST_RUN%"=="1" echo One-time setup completed. Launching the app...
 
 echo Launching Electron app...
-start "TTL_RL Electron App" cmd /c "pushd \"%~dp0frontend\electron\" & npm start"
+start "TTL_RL Electron App" cmd /c "pushd \"%~dp0frontend\electron\" ^& npm start"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to launch Electron app
   echo Continuing anyway...
@@ -220,6 +106,16 @@ echo Press any key to close this window and stop all services...
 pause >nul
 
 goto :eof
+
+REM ---- Missing dependency handler ----
+:missing_deps
+echo.
+echo One or more dependencies are missing.
+echo Please run run_first.bat in this folder to install prerequisites.
+echo.
+echo Press any key to exit...
+pause >nul
+exit /b 1
 
 REM ---- Helpers ----
 :wait_for_port
