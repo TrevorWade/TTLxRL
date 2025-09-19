@@ -42,7 +42,7 @@ echo.
 
 REM ---- Start frontend in the same window (background) ----
 echo Starting frontend server...
-start /b "TTL_RL Frontend" cmd /c "pushd \"%~dp0frontend\" ^& npm run dev"
+start "TTL_RL Frontend" cmd /k "pushd \"%~dp0frontend\" ^& npm run dev"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start frontend server
   echo Continuing anyway...
@@ -51,7 +51,7 @@ if %ERRORLEVEL% NEQ 0 (
 
 REM ---- Start backend in the same window (background) ----
 echo Starting backend server...
-start /b "TTL_RL Backend" cmd /c "pushd \"%~dp0backend\" ^& npm start"
+start "TTL_RL Backend" cmd /k "pushd \"%~dp0backend\" ^& npm start"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start backend server
   echo Continuing anyway...
@@ -67,7 +67,7 @@ call :wait_for_port 5178 20
 if "%FIRST_RUN%"=="1" echo One-time setup completed. Launching the app...
 
 echo Launching Electron app...
-start "TTL_RL Electron App" cmd /c "pushd \"%~dp0frontend\electron\" ^& npm start"
+start "TTL_RL Electron App" cmd /k "pushd \"%~dp0frontend\electron\" ^& npm start"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to launch Electron app
   echo Continuing anyway...
