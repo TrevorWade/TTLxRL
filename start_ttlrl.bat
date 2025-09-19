@@ -1,11 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
-REM Ensure a persistent console window (prevents quick-close on double-click)
-if "%PERSISTENT_SHELL%"=="1" goto :persisted_console
-start "TTL_RL Launcher" cmd /k "set PERSISTENT_SHELL=1 ^& call \"%~f0\""
+REM Relaunch hidden so no terminal windows show
+if "%~1"=="hidden" goto :hidden
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath '%~f0' -ArgumentList 'hidden'"
 exit /b
 
-:persisted_console
+:hidden
 if "%DEBUG%"=="1" pause
 REM ============================================
 REM  TikTok Live → Key Mapper starter script
@@ -40,34 +40,26 @@ IF NOT EXIST backend\.env (
 echo Dependencies detected. Starting services...
 echo.
 
-REM ---- Start frontend in the same window (background) ----
-echo Starting frontend server...
-start "TTL_RL Frontend" cmd /k "pushd \"%~dp0frontend\" ^& npm run dev"
+REM ---- Start frontend (hidden) ----
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','npm run dev' -WorkingDirectory '%~dp0frontend'"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start frontend server
   echo Continuing anyway...
   set /a ERROR_COUNT+=1
 )
 
-REM ---- Start backend in the same window (background) ----
-echo Starting backend server...
-start "TTL_RL Backend" cmd /k "pushd \"%~dp0backend\" ^& npm start"
+REM ---- Start backend (hidden) ----
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','npm start' -WorkingDirectory '%~dp0backend'"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start backend server
   echo Continuing anyway...
   set /a ERROR_COUNT+=1
 )
 
-REM ---- Wait for servers to start listening, then launch Electron app ----
-echo Waiting for servers to start...
-echo - Waiting for frontend (port 5173) to listen...
-call :wait_for_port 5173 20
-echo - Waiting for backend (port 5178) to listen...
-call :wait_for_port 5178 20
-if "%FIRST_RUN%"=="1" echo One-time setup completed. Launching the app...
+REM Skipping wait; launch Electron immediately
 
-echo Launching Electron app...
-start "TTL_RL Electron App" cmd /k "pushd \"%~dp0frontend\electron\" ^& npm start"
+REM ---- Launch Electron (console hidden) ----
+powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','npm start' -WorkingDirectory '%~dp0frontend\electron'"
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to launch Electron app
   echo Continuing anyway...
@@ -86,35 +78,15 @@ if %ERRORLEVEL% EQU 0 (
     echo The app might still be starting up...
 )
 
-echo.
-echo ============================================
-echo  APPLICATION STATUS                          
-echo  FRONTEND : http://localhost:5173           
-echo  BACKEND  : ws://localhost:5178            
-echo  Electron app should be launching...
-echo  Close this window to stop all services.               
-echo ============================================
-echo.
-if %ERROR_COUNT% GTR 0 (
-  echo Script completed with %ERROR_COUNT% warnings/errors.
-  echo Check the messages above for details.
-) else (
-  echo Script completed successfully!
-)
-echo.
-echo Press any key to close this window and stop all services...
-pause >nul
+REM Exit immediately; windows are hidden
+goto :eof
 
 goto :eof
 
 REM ---- Missing dependency handler ----
 :missing_deps
-echo.
-echo One or more dependencies are missing.
-echo Please run run_first.bat in this folder to install prerequisites.
-echo.
-echo Press any key to exit...
-pause >nul
+REM Show minimal message box without a console window
+powershell -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Dependencies missing. Run run_first.bat first.','TTLxRL') | Out-Null"
 exit /b 1
 
 REM ---- Helpers ----
