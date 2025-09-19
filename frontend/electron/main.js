@@ -3,6 +3,7 @@ const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
+const net = require('net');
 
 // Keep a global reference of the window object
 // If you don't, the window will be closed automatically when the JavaScript object is garbage collected
@@ -10,15 +11,40 @@ let mainWindow;
 let overlayWindow = null;
 
 function startBackend() {
+  const port = Number(process.env.WS_PORT || 5178);
+  const tester = net.createServer();
+
+  const start = () => {
+    try {
+      const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+      const backendEntry = isDev
+        ? path.join(__dirname, '../../backend/index.js')
+        : path.join(process.resourcesPath, 'backend', 'index.js');
+      require(backendEntry);
+      console.log('Backend started from:', backendEntry);
+    } catch (err) {
+      console.error('Failed to start backend:', err);
+    }
+  };
+
+  tester.once('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.log(`Backend port ${port} already in use. Skipping backend start.`);
+    } else {
+      console.warn('Port check error; attempting to start backend anyway:', err?.message || err);
+      start();
+    }
+  });
+
+  tester.once('listening', () => {
+    tester.close(() => start());
+  });
+
   try {
-    const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-    const backendEntry = isDev
-      ? path.join(__dirname, '../../backend/index.js')
-      : path.join(process.resourcesPath, 'backend', 'index.js');
-    require(backendEntry);
-    console.log('Backend started from:', backendEntry);
-  } catch (err) {
-    console.error('Failed to start backend:', err);
+    tester.listen(port, '0.0.0.0');
+  } catch (e) {
+    console.warn('Immediate port listen failed; attempting to start backend anyway:', e.message);
+    start();
   }
 }
 
