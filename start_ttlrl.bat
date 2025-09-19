@@ -48,8 +48,7 @@ if %ERRORLEVEL% NEQ 0 (
   set /a ERROR_COUNT+=1
 )
 
-REM ---- Start backend (hidden) ----
-powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList '/c','npm start' -WorkingDirectory '%~dp0backend'"
+REM ---- Backend is started by Electron main process; do not start it here ----
 if %ERRORLEVEL% NEQ 0 (
   echo WARNING: Failed to start backend server
   echo Continuing anyway...
